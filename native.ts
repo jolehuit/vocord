@@ -5,7 +5,7 @@
  */
 
 import { execFile, spawn } from "child_process";
-import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { randomBytes } from "crypto";
 import https from "https";
 import { arch, homedir, platform, tmpdir } from "os";
@@ -44,6 +44,11 @@ function isMacAppleSilicon(): boolean {
 }
 
 function resolveBackend(): "parakeet-mlx" | "transcribe-rs" {
+    const backendFile = join(VOCORD_DATA, "backend");
+    if (existsSync(backendFile)) {
+        const value = readFileSync(backendFile, "utf-8").trim();
+        if (value === "parakeet-mlx" || value === "transcribe-rs") return value;
+    }
     return isMacAppleSilicon() ? "parakeet-mlx" : "transcribe-rs";
 }
 

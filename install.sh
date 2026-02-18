@@ -46,6 +46,8 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
         *) BACKEND="parakeet-mlx" ;;
     esac
     echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
+    mkdir -p "$VOCORD_DATA"
+    echo "$BACKEND" > "$VOCORD_DATA/backend"
 else
     if [[ "$OS" == "Darwin" ]]; then
         echo -e "  ${GREEN}Platform:${NC} macOS Intel"
@@ -53,6 +55,8 @@ else
         echo -e "  ${GREEN}Platform:${NC} $OS ($ARCH)"
     fi
     echo -e "  ${GREEN}Backend:${NC}  transcribe-rs"
+    mkdir -p "$VOCORD_DATA"
+    echo "transcribe-rs" > "$VOCORD_DATA/backend"
 fi
 echo ""
 
