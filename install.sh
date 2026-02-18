@@ -312,7 +312,9 @@ else
     cargo build --release --quiet 2>&1
 
     if [[ -f "target/release/transcribe-cli" ]]; then
-        echo -e "  ${GREEN}transcribe-cli built${NC}"
+        mkdir -p "$VOCORD_DATA"
+        cp "target/release/transcribe-cli" "$VOCORD_DATA/transcribe-cli"
+        echo -e "  ${GREEN}transcribe-cli built and installed to $VOCORD_DATA${NC}"
     else
         echo -e "${RED}Error: Build failed${NC}"
         exit 1
@@ -360,10 +362,6 @@ mkdir -p "$DEST"
 cp "$TMPDIR_VOCORD/vocord/index.tsx" "$DEST/"
 cp "$TMPDIR_VOCORD/vocord/native.ts" "$DEST/"
 
-# Copy transcribe-cli with built binary if applicable
-if [[ "$BACKEND" == "transcribe-rs" ]]; then
-    cp -r "$TMPDIR_VOCORD/vocord/transcribe-cli" "$DEST/"
-fi
 
 echo -e "  ${GREEN}Installed to: $DEST${NC}"
 

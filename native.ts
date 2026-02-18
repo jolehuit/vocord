@@ -276,7 +276,7 @@ async function runTranscribeRs(wavPath: string, language: string): Promise<strin
     }
 
     const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
-    const cliPath = join(__dirname, "transcribe-cli", "target", "release", cliBin);
+    const cliPath = join(VOCORD_DATA, cliBin);
 
     const args = ["--audio", wavPath, "--model", DEFAULT_PARAKEET_MODEL];
     if (language) args.push("--language", language);
