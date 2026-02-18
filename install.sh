@@ -314,17 +314,20 @@ else
         exit 1
     fi
 
-    # Download model
-    MODEL_PATH="$VOCORD_DATA/ggml-medium-q4_1.bin"
+    # Download Parakeet model
+    MODEL_DIR="$VOCORD_DATA/parakeet-v3-int8"
 
-    if [[ ! -f "$MODEL_PATH" ]]; then
-        echo "  Downloading Whisper model (~500 MB)..."
+    if [[ ! -d "$MODEL_DIR" ]]; then
+        echo "  Downloading Parakeet v3 int8 model (~200 MB)..."
         mkdir -p "$VOCORD_DATA"
-        curl -L --progress-bar -o "$MODEL_PATH" \
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q4_1.bin"
-        echo -e "  ${GREEN}Model saved to: $MODEL_PATH${NC}"
+        curl -L --progress-bar -o "$VOCORD_DATA/parakeet-v3-int8.tar.gz" \
+            "https://blob.handy.computer/parakeet-v3-int8.tar.gz"
+        echo "  Extracting model..."
+        tar -xzf "$VOCORD_DATA/parakeet-v3-int8.tar.gz" -C "$VOCORD_DATA"
+        rm -f "$VOCORD_DATA/parakeet-v3-int8.tar.gz"
+        echo -e "  ${GREEN}Model saved to: $MODEL_DIR${NC}"
     else
-        echo -e "  Model already at: $MODEL_PATH"
+        echo -e "  Model already at: $MODEL_DIR"
     fi
 fi
 

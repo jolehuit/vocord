@@ -41,9 +41,9 @@ Restart Discord / Vesktop, enable **Vocord** in Settings > Vencord > Plugins, an
 | Platform | Backend | How |
 |----------|---------|-----|
 | macOS Apple Silicon | [mlx-whisper](https://github.com/ml-explore/mlx-examples) | GPU-accelerated via Apple MLX |
-| Linux / Windows / macOS Intel | [transcribe-rs](https://github.com/cjpais/transcribe-rs) | whisper.cpp via Rust (Metal/Vulkan GPU) |
+| Linux / Windows / macOS Intel | [Parakeet](https://github.com/cjpais/transcribe-rs) via transcribe-rs | ONNX runtime (Metal/Vulkan GPU) |
 
-The installer lets you choose your backend on macOS Apple Silicon. On other platforms, transcribe-rs is used automatically. You can also switch in the plugin settings.
+The installer lets you choose your backend on macOS Apple Silicon. On other platforms, Parakeet is used automatically.
 
 ## Features
 
@@ -93,10 +93,11 @@ If you prefer not to use the one-liner:
    cd src/userplugins/vocord/transcribe-cli
    cargo build --release
 
-   # Download a Whisper model (~500 MB)
+   # Download Parakeet v3 int8 model (~200 MB)
    mkdir -p ~/.local/share/vocord
-   curl -L -o ~/.local/share/vocord/ggml-medium-q4_1.bin \
-     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q4_1.bin
+   curl -L -o /tmp/parakeet.tar.gz https://blob.handy.computer/parakeet-v3-int8.tar.gz
+   tar -xzf /tmp/parakeet.tar.gz -C ~/.local/share/vocord
+   rm /tmp/parakeet.tar.gz
    ```
 
 4. **Build**:
@@ -134,7 +135,7 @@ index.tsx (browser) ---IPC---> native.ts (Node.js)
                     mlx-whisper       ffmpeg (ogg->wav)
                     (uv venv)             |
                          |          transcribe-cli
-                         |          (Rust/whisper.cpp)
+                         |          (Parakeet v3 / ONNX)
                           \             /
                            JSON result
                          {"text": "..."}
@@ -146,10 +147,10 @@ index.tsx (browser) ---IPC---> native.ts (Node.js)
 |-------|-----|
 | Plugin not showing (Vesktop) | The installer auto-configures Vesktop. If it didn't work: Vesktop Settings > Developer Options > Vencord Location → select your Vencord `dist/` folder |
 | Plugin not showing (Discord) | Rebuild (`cd Vencord && pnpm build`) and inject (`pnpm inject`), then restart Discord |
-| mlx-whisper not installed | `uv pip install --python ~/.local/share/vocord/venv/bin/python mlx-whisper` |
+| mlx-whisper not installed | Re-run the installer, or: `uv pip install --python ~/.local/share/vocord/venv/bin/python mlx-whisper` |
 | ffmpeg not found | `brew install ffmpeg` / `sudo apt install ffmpeg` |
 | transcribe-cli not found | `cd transcribe-cli && cargo build --release` |
-| No GGML model path | Set path in Settings > Plugins > Vocord |
+| Parakeet model not found | Re-run the installer to download the model |
 
 ## License
 

@@ -14,7 +14,7 @@ import { join } from "path";
 const TEMP_DIR = join(tmpdir(), "vencord-vocord");
 const VOCORD_DATA = join(homedir(), ".local", "share", "vocord");
 const VOCORD_VENV_PYTHON = join(VOCORD_DATA, "venv", "bin", "python");
-const DEFAULT_GGML_MODEL = join(VOCORD_DATA, "ggml-medium-q4_1.bin");
+const DEFAULT_PARAKEET_MODEL = join(VOCORD_DATA, "parakeet-v3-int8");
 const DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo";
 const MAX_REDIRECTS = 5;
 const ALLOWED_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];
@@ -278,17 +278,17 @@ async function runMlxWhisper(audioPath: string, model: string, language: string)
     });
 }
 
-/** Transcribe audio using transcribe-cli (cross-platform, Rust/whisper.cpp). */
+/** Transcribe audio using transcribe-cli (cross-platform, Parakeet). */
 async function runTranscribeRs(wavPath: string, language: string): Promise<string> {
-    if (!existsSync(DEFAULT_GGML_MODEL)) {
+    if (!existsSync(DEFAULT_PARAKEET_MODEL)) {
         rmSync(wavPath, { force: true });
-        throw new Error(`Whisper model not found at ${DEFAULT_GGML_MODEL}. Re-run the Vocord installer.`);
+        throw new Error(`Parakeet model not found at ${DEFAULT_PARAKEET_MODEL}. Re-run the Vocord installer.`);
     }
 
     const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
     const cliPath = join(__dirname, "transcribe-cli", "target", "release", cliBin);
 
-    const args = ["--audio", wavPath, "--model", DEFAULT_GGML_MODEL];
+    const args = ["--audio", wavPath, "--model", DEFAULT_PARAKEET_MODEL];
     if (language) args.push("--language", language);
 
     return runSubprocess({
@@ -321,7 +321,7 @@ export async function transcribe(
             console.log(`[Vocord] Converting OGG to WAV...`);
             const wavPath = await convertToWav(oggPath);
 
-            console.log(`[Vocord] Transcribing with transcribe-rs, model: ${DEFAULT_GGML_MODEL}`);
+            console.log(`[Vocord] Transcribing with Parakeet, model: ${DEFAULT_PARAKEET_MODEL}`);
             text = await runTranscribeRs(wavPath, language);
         }
 

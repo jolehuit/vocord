@@ -3,23 +3,20 @@ use std::process;
 
 use clap::Parser;
 use serde::Serialize;
-use transcribe_rs::{
-    engines::whisper::{WhisperEngine, WhisperInferenceParams, WhisperModelParams},
-    TranscriptionEngine,
-};
+use transcribe_rs::{engines::parakeet::ParakeetEngine, TranscriptionEngine};
 
 #[derive(Parser)]
-#[command(name = "transcribe-cli", about = "Transcribe audio files using Whisper")]
+#[command(name = "transcribe-cli", about = "Transcribe audio files using Parakeet")]
 struct Args {
     /// Path to the WAV audio file (16kHz, 16-bit, mono)
     #[arg(long)]
     audio: PathBuf,
 
-    /// Path to the Whisper GGML model file
+    /// Path to the Parakeet model directory
     #[arg(long)]
     model: PathBuf,
 
-    /// Language code for transcription (e.g. "en", "es", "fr"). Auto-detected if omitted.
+    /// Language code (unused, Parakeet auto-detects)
     #[arg(long)]
     language: Option<String>,
 }
@@ -35,17 +32,10 @@ struct ErrorOutput {
 }
 
 fn run(args: Args) -> Result<String, Box<dyn std::error::Error>> {
-    let model_params = WhisperModelParams { use_gpu: true };
+    let mut engine = ParakeetEngine::new();
+    engine.load_model(&args.model)?;
 
-    let mut engine = WhisperEngine::new();
-    engine.load_model_with_params(&args.model, model_params)?;
-
-    let inference_params = WhisperInferenceParams {
-        language: args.language,
-        ..Default::default()
-    };
-
-    let result = engine.transcribe_file(&args.audio, Some(inference_params))?;
+    let result = engine.transcribe_file(&args.audio, None)?;
     Ok(result.text)
 }
 
@@ -55,13 +45,19 @@ fn main() {
     match run(args) {
         Ok(text) => {
             let output = SuccessOutput { text };
-            println!("{}", serde_json::to_string(&output).expect("failed to serialize output"));
+            println!(
+                "{}",
+                serde_json::to_string(&output).expect("failed to serialize output")
+            );
         }
         Err(e) => {
             let output = ErrorOutput {
                 error: e.to_string(),
             };
-            eprintln!("{}", serde_json::to_string(&output).expect("failed to serialize error"));
+            eprintln!(
+                "{}",
+                serde_json::to_string(&output).expect("failed to serialize error")
+            );
             process::exit(1);
         }
     }
