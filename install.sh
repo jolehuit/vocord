@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Vocord - One-line installer
-# Usage: curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
-# Override Vencord path: VENCORD_DIR=~/my/vencord curl -sSL ... | bash
+# Usage: curl -sSLO https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh && bash install.sh
+# Override Vencord path: VENCORD_DIR=~/my/vencord bash install.sh
 
 set -eo pipefail
 
@@ -39,8 +39,8 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo -e "    ${CYAN}1)${NC} mlx-whisper  — fast, uses Apple GPU (recommended)"
     echo -e "    ${CYAN}2)${NC} transcribe-rs — Rust/whisper.cpp, CPU-based"
     echo ""
-    printf "  Choice [1]: "
-    read -r BACKEND_CHOICE </dev/tty 2>/dev/null || BACKEND_CHOICE=""
+    printf "  Choice [1]: " >/dev/tty
+    read -r BACKEND_CHOICE </dev/tty || BACKEND_CHOICE=""
     case "$BACKEND_CHOICE" in
         2) BACKEND="transcribe-rs" ;;
         *) BACKEND="mlx-whisper" ;;

@@ -6,7 +6,7 @@ Cross-platform voice message transcription for [Vencord](https://github.com/Vend
 
 **macOS / Linux:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
+curl -sSLO https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh && bash install.sh
 ```
 
 **Windows (PowerShell):**
@@ -29,7 +29,7 @@ Restart Discord / Vesktop, enable **Vocord** in Settings > Vencord > Plugins, an
 
 > **Tip:** If the installer can't find your Vencord source, you can specify it:
 > ```bash
-> VENCORD_DIR=~/path/to/Vencord curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
+> curl -sSLO https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh && VENCORD_DIR=~/path/to/Vencord bash install.sh
 > ```
 > On Windows:
 > ```powershell
