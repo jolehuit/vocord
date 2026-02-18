@@ -39,14 +39,8 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo -e "    ${CYAN}1)${NC} mlx-whisper  — fast, uses Apple GPU (recommended)"
     echo -e "    ${CYAN}2)${NC} transcribe-rs — Rust/whisper.cpp, CPU-based"
     echo ""
-    if [[ -t 0 ]]; then
-        # Interactive terminal — ask the user
-        printf "  Choice [1]: "
-        read -r BACKEND_CHOICE </dev/tty 2>/dev/null || BACKEND_CHOICE=""
-    else
-        # Non-interactive (curl | bash) — default to mlx-whisper
-        BACKEND_CHOICE=""
-    fi
+    printf "  Choice [1]: "
+    read -r BACKEND_CHOICE </dev/tty 2>/dev/null || BACKEND_CHOICE=""
     case "$BACKEND_CHOICE" in
         2) BACKEND="transcribe-rs" ;;
         *) BACKEND="mlx-whisper" ;;
