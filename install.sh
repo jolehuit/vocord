@@ -4,7 +4,7 @@
 # Usage: curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
 # Override Vencord path: VENCORD_DIR=~/my/vencord curl -sSL ... | bash
 
-set -e
+set -eo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -342,8 +342,19 @@ echo -e "${BOLD}[4/4]${NC} Building Vencord..."
 
 cd "$VENCORD_DIR"
 if command -v pnpm &> /dev/null; then
-    pnpm build 2>&1 | tail -3
-    echo -e "  ${GREEN}Build complete${NC}"
+    if pnpm build 2>&1 | tail -5; then
+        # Verify the plugin is actually in the build output
+        if grep -q "Vocord" "$VENCORD_DIR/dist/renderer.js" 2>/dev/null; then
+            echo -e "  ${GREEN}Build complete (Vocord verified in output)${NC}"
+        else
+            echo -e "${RED}  Build succeeded but Vocord not found in output!${NC}"
+            echo -e "${RED}  Check that $DEST/index.tsx exists and retry: cd $VENCORD_DIR && pnpm build${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${RED}  Build failed! Retry manually: cd $VENCORD_DIR && pnpm build${NC}"
+        exit 1
+    fi
 else
     echo -e "${YELLOW}  pnpm not found -- rebuild manually: cd $VENCORD_DIR && pnpm build${NC}"
 fi
@@ -355,8 +366,10 @@ configure_vesktop "$VENCORD_DIR/dist" || true
 # Check for Discord Desktop and inject if detected and not using Vesktop
 check_discord_desktop "$VENCORD_DIR"
 [[ -z "$VESKTOP_DATA" && -n "$DISCORD_APP" ]] && {
-    echo -e " ${GREEN}Injecting Vencord into Discord Desktop...${NC}"
-    cd "$VENCORD_DIR" && pnpm inject 2>&1 | tail -3
+    echo -e "  ${GREEN}Injecting Vencord into Discord Desktop...${NC}"
+    if ! (cd "$VENCORD_DIR" && pnpm inject 2>&1 | tail -5); then
+        echo -e "${YELLOW}  Warning: Vencord injection failed. Try manually: cd $VENCORD_DIR && pnpm inject${NC}"
+    fi
 }
 
 # ── Done ──────────────────────────────────────────────────────────
