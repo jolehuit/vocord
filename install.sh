@@ -246,7 +246,7 @@ if [[ "$IS_MAC_ARM" == true ]]; then
     # Create isolated venv and install mlx-whisper
     VOCORD_VENV="$VOCORD_DATA/venv"
     echo "  Creating venv at $VOCORD_VENV..."
-    uv venv "$VOCORD_VENV" --quiet
+    uv venv "$VOCORD_VENV" --quiet --allow-existing
     echo "  Installing mlx-whisper (this may take a moment)..."
     uv pip install --python "$VOCORD_VENV/bin/python" mlx-whisper --quiet
 
