@@ -305,6 +305,18 @@ else
     fi
 fi
 
+# ── Close Vesktop before making any changes ───────────────────────
+
+if [[ -n "$VESKTOP_DATA" ]]; then
+    echo ""
+    echo -e "${YELLOW}Closing Vesktop to apply changes...${NC}"
+    if [[ "$OS" == "Darwin" ]]; then
+        pkill -x "Vesktop" 2>/dev/null && sleep 2 || true
+    elif [[ "$OS" == "Linux" ]]; then
+        pkill -x "vesktop" 2>/dev/null && sleep 2 || true
+    fi
+fi
+
 # ── Step 3: Install plugin ────────────────────────────────────────
 
 echo ""
@@ -327,16 +339,6 @@ echo -e "  ${GREEN}Installed to: $DEST${NC}"
 
 echo ""
 echo -e "${BOLD}[4/4]${NC} Building Vencord..."
-
-# Close Vesktop before building
-if [[ -n "$VESKTOP_DATA" ]]; then
-    echo "  Closing Vesktop for build..."
-    if [[ "$OS" == "Darwin" ]]; then
-        pkill -x "Vesktop" 2>/dev/null && sleep 1 || true
-    elif [[ "$OS" == "Linux" ]]; then
-        pkill -x "vesktop" 2>/dev/null && sleep 1 || true
-    fi
-fi
 
 cd "$VENCORD_DIR"
 if command -v pnpm &> /dev/null; then
@@ -365,12 +367,10 @@ echo ""
 
 # Restart Vesktop if detected
 if [[ -n "$VESKTOP_DATA" ]]; then
-    echo -e "  Restarting Vesktop..."
+    echo -e "  ${GREEN}Restarting Vesktop...${NC}"
     if [[ "$OS" == "Darwin" ]]; then
-        pkill -x "Vesktop" 2>/dev/null && sleep 1 || true
         open -a Vesktop
     elif [[ "$OS" == "Linux" ]]; then
-        pkill -x "vesktop" 2>/dev/null && sleep 1 || true
         vesktop &>/dev/null &
     fi
     echo ""
