@@ -3,7 +3,8 @@ use std::process;
 
 use clap::Parser;
 use serde::Serialize;
-use transcribe_rs::{engines::parakeet::ParakeetEngine, TranscriptionEngine};
+use transcribe_rs::engines::parakeet::{ParakeetEngine, ParakeetModelParams};
+use transcribe_rs::TranscriptionEngine;
 
 #[derive(Parser)]
 #[command(name = "transcribe-cli", about = "Transcribe audio files using Parakeet")]
@@ -33,7 +34,7 @@ struct ErrorOutput {
 
 fn run(args: Args) -> Result<String, Box<dyn std::error::Error>> {
     let mut engine = ParakeetEngine::new();
-    engine.load_model(&args.model)?;
+    engine.load_model_with_params(&args.model, ParakeetModelParams::int8())?;
 
     let result = engine.transcribe_file(&args.audio, None)?;
     Ok(result.text)
