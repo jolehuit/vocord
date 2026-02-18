@@ -49,10 +49,8 @@ const transcriptions = new Map<string, string>();
 const pendingTranscriptions = new Set<string>();
 const processedElements = new WeakSet<Element>();
 
-let backendOverride: "mlx-whisper" | "transcribe-rs" | null = null;
-
 function getActiveBackend(): string {
-    return backendOverride ?? settings.store.transcribeBackend;
+    return settings.store.transcribeBackend;
 }
 
 let observer: MutationObserver | null = null;
@@ -64,67 +62,31 @@ const SPINNER_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"
 
 const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>`;
 
-function setSvg(el: Element, svg: string): void {
-    const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
-    const svgEl = parsed.documentElement;
-    el.replaceChildren(document.importNode(svgEl, true));
-}
-
-function getBackendLabel(backend: string): string {
-    switch (backend) {
-        case "mlx-whisper": return "MLX";
-        case "transcribe-rs": return "RS";
-        default: return "AUTO";
-    }
+function setSvg(el: HTMLElement, svg: string): void {
+    el.innerHTML = svg; // safe: SVG strings are hardcoded constants
 }
 
 function getAudioUrl(element: Element): string | null {
     const audio = element.querySelector("audio");
     if (audio?.src) return audio.src;
-
-    const wrapper = element.closest("[class*='voiceMessage']") ||
-                    element.closest("[class*='audioControls']") ||
-                    element.closest("[class*='waveformContainer']");
-
-    if (wrapper) {
-        const parentAudio = wrapper.querySelector("audio");
-        if (parentAudio?.src) return parentAudio.src;
-
-        const source = wrapper.querySelector("source");
+    if (audio) {
+        const source = audio.querySelector("source");
         if (source?.src) return source.src;
     }
 
+    // Walk up the DOM to find a parent containing an audio element
+    let parent = element.parentElement;
+    for (let i = 0; i < 5 && parent; i++) {
+        const parentAudio = parent.querySelector("audio");
+        if (parentAudio) {
+            if (parentAudio.src) return parentAudio.src;
+            const source = parentAudio.querySelector("source");
+            if (source?.src) return source.src;
+        }
+        parent = parent.parentElement;
+    }
+
     return null;
-}
-
-function updateToggleElement(el: Element): void {
-    const active = getActiveBackend();
-    el.textContent = getBackendLabel(active);
-    (el as HTMLElement).title = `Backend: ${active} (click to switch)`;
-    el.setAttribute("data-backend", active);
-}
-
-function createBackendToggle(): HTMLElement {
-    const toggle = document.createElement("button");
-    toggle.className = "vc-vocord-toggle";
-    updateToggleElement(toggle);
-
-    toggle.addEventListener("click", e => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        backendOverride = backendOverride === "transcribe-rs" ? "mlx-whisper" : "transcribe-rs";
-
-        document.querySelectorAll(".vc-vocord-toggle").forEach(updateToggleElement);
-
-        Toasts.show({
-            message: `Backend: ${backendOverride}`,
-            type: Toasts.Type.SUCCESS,
-            id: Toasts.genId()
-        });
-    });
-
-    return toggle;
 }
 
 function getAudioId(url: string): string {
@@ -144,22 +106,14 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
     wrapper.className = "vc-vocord-wrapper";
     wrapper.setAttribute("data-audio-id", audioId);
 
-    const btnRow = document.createElement("div");
-    btnRow.className = "vc-vocord-btn-row";
-
     const button = document.createElement("button");
     button.className = "vc-vocord-btn";
     button.title = "Transcribe voice message";
     setSvg(button, MICROPHONE_SVG);
 
-    const toggle = createBackendToggle();
-    btnRow.appendChild(button);
-    btnRow.appendChild(toggle);
-
     const existingTranscription = transcriptions.get(audioId);
     if (existingTranscription) {
         const transcriptionBox = createTranscriptionBox(existingTranscription, audioId);
-        wrapper.appendChild(btnRow);
         wrapper.appendChild(transcriptionBox);
         return wrapper;
     }
@@ -194,6 +148,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
                 });
             } else {
                 transcriptions.set(audioId, result.text);
+                button.style.display = "none";
                 const transcriptionBox = createTranscriptionBox(result.text, audioId);
                 wrapper.appendChild(transcriptionBox);
 
@@ -214,14 +169,16 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
             });
         } finally {
             pendingTranscriptions.delete(audioId);
-            button.disabled = false;
-            button.classList.remove("transcribing");
-            setSvg(button, MICROPHONE_SVG);
-            button.title = "Transcribe voice message";
+            if (button.style.display !== "none") {
+                button.disabled = false;
+                button.classList.remove("transcribing");
+                setSvg(button, MICROPHONE_SVG);
+                button.title = "Transcribe voice message";
+            }
         }
     });
 
-    wrapper.appendChild(btnRow);
+    wrapper.appendChild(button);
     return wrapper;
 }
 
@@ -263,35 +220,20 @@ function createTranscriptionBox(text: string, audioId: string): HTMLElement {
 }
 
 function processVoiceMessages(): void {
-    const selectors = [
-        "[class*='voiceMessage']",
-        "[class*='audioControls']",
-        "[class*='waveform']",
-        "[class*='audio_']"
-    ];
+    // Find audio elements directly — resilient to Discord class name changes
+    document.querySelectorAll("audio").forEach(audio => {
+        const url = audio.src || audio.querySelector("source")?.src;
+        if (!url) return;
 
-    const voiceMessages = document.querySelectorAll(selectors.join(","));
+        const container = audio.parentElement;
+        if (!container || processedElements.has(container)) return;
 
-    voiceMessages.forEach(vm => {
-        if (processedElements.has(vm)) return;
+        processedElements.add(container);
 
-        const audioUrl = getAudioUrl(vm);
-        if (!audioUrl) return;
-        if (vm.querySelector(".vc-vocord-wrapper")) return;
-
-        processedElements.add(vm);
-
-        const controlsContainer = vm.querySelector("[class*='controls']") ||
-                                   vm.querySelector("[class*='buttons']") ||
-                                   vm;
-
-        const button = createTranscribeButton(audioUrl, vm);
-
-        if (controlsContainer && controlsContainer !== vm) {
-            controlsContainer.appendChild(button);
-        } else {
-            vm.parentElement?.insertBefore(button, vm.nextSibling);
-        }
+        // Place right after the player as a sibling, not inside
+        if (container.parentElement?.querySelector(".vc-vocord-wrapper")) return;
+        const btn = createTranscribeButton(url, container);
+        container.insertAdjacentElement("afterend", btn);
     });
 }
 
@@ -306,48 +248,11 @@ export default definePlugin({
         style.id = "vc-vocord-styles";
         style.textContent = `
             .vc-vocord-wrapper {
-                display: inline-flex;
+                display: flex;
                 flex-direction: column;
-                gap: 8px;
-                margin-left: 8px;
-                vertical-align: middle;
-            }
-
-            .vc-vocord-btn-row {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-            }
-
-            .vc-vocord-toggle {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                height: 24px;
-                padding: 0 6px;
-                border: none;
-                border-radius: 4px;
-                background: var(--background-secondary);
-                color: var(--interactive-normal);
-                cursor: pointer;
-                font-size: 10px;
-                font-weight: 700;
-                font-family: var(--font-code);
-                letter-spacing: 0.5px;
-                transition: all 0.15s ease;
-            }
-
-            .vc-vocord-toggle:hover {
-                background: var(--background-tertiary);
-                color: var(--interactive-hover);
-            }
-
-            .vc-vocord-toggle[data-backend="mlx-whisper"] {
-                color: var(--text-positive);
-            }
-
-            .vc-vocord-toggle[data-backend="transcribe-rs"] {
-                color: var(--text-brand);
+                gap: 6px;
+                margin-top: 6px;
+                margin-left: 12px;
             }
 
             .vc-vocord-btn {
@@ -358,15 +263,15 @@ export default definePlugin({
                 height: 32px;
                 border: none;
                 border-radius: 50%;
-                background: var(--background-secondary);
-                color: var(--interactive-normal);
+                background: rgba(255, 255, 255, 0.1);
+                color: #dcddde;
                 cursor: pointer;
                 transition: all 0.15s ease;
             }
 
             .vc-vocord-btn:hover:not(:disabled) {
-                background: var(--background-tertiary);
-                color: var(--interactive-hover);
+                background: #5865f2;
+                color: #fff;
             }
 
             .vc-vocord-btn:disabled {
@@ -388,9 +293,10 @@ export default definePlugin({
                 align-items: flex-start;
                 gap: 8px;
                 padding: 8px 12px;
-                background: var(--background-secondary);
+                background: rgba(255, 255, 255, 0.06);
                 border-radius: 8px;
-                max-width: 400px;
+                width: 400px;
+                max-height: 120px;
                 margin-top: 4px;
             }
 
@@ -398,8 +304,10 @@ export default definePlugin({
                 flex: 1;
                 font-size: 14px;
                 line-height: 1.4;
-                color: var(--text-normal);
+                color: #dcddde;
                 word-wrap: break-word;
+                overflow-y: auto;
+                max-height: 100px;
             }
 
             .vc-vocord-transcription-copy {
@@ -411,14 +319,14 @@ export default definePlugin({
                 border: none;
                 border-radius: 4px;
                 background: transparent;
-                color: var(--interactive-normal);
+                color: #b5bac1;
                 cursor: pointer;
                 flex-shrink: 0;
             }
 
             .vc-vocord-transcription-copy:hover {
-                background: var(--background-tertiary);
-                color: var(--interactive-hover);
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
             }
         `;
         document.head.appendChild(style);
@@ -455,7 +363,6 @@ export default definePlugin({
 
         transcriptions.clear();
         pendingTranscriptions.clear();
-        backendOverride = null;
 
         console.log("[Vocord] Plugin stopped");
     }

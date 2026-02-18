@@ -319,6 +319,7 @@ async function runTranscribeRs(
 }
 
 export async function transcribe(
+    _event: unknown,
     audioUrl: string,
     model: string,
     language: string,

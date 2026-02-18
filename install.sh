@@ -31,10 +31,29 @@ trap cleanup EXIT
 
 # ── Detect platform ───────────────────────────────────────────────
 
+BACKEND="transcribe-rs"
+
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     IS_MAC_ARM=true
     echo -e "  ${GREEN}Platform:${NC} macOS Apple Silicon"
-    echo -e "  ${GREEN}Backend:${NC}  mlx-whisper"
+    echo ""
+    echo -e "  ${BOLD}Choose transcription backend:${NC}"
+    echo -e "    ${CYAN}1)${NC} mlx-whisper  — fast, uses Apple GPU (recommended)"
+    echo -e "    ${CYAN}2)${NC} transcribe-rs — Rust/whisper.cpp, CPU-based"
+    echo ""
+    if [[ -t 0 ]]; then
+        # Interactive terminal — ask the user
+        printf "  Choice [1]: "
+        read -r BACKEND_CHOICE </dev/tty 2>/dev/null || BACKEND_CHOICE=""
+    else
+        # Non-interactive (curl | bash) — default to mlx-whisper
+        BACKEND_CHOICE=""
+    fi
+    case "$BACKEND_CHOICE" in
+        2) BACKEND="transcribe-rs"; IS_MAC_ARM=false ;;
+        *) BACKEND="mlx-whisper" ;;
+    esac
+    echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
 elif [[ "$OS" == "Darwin" ]]; then
     echo -e "  ${GREEN}Platform:${NC} macOS Intel"
     echo -e "  ${GREEN}Backend:${NC}  transcribe-rs"
@@ -222,6 +241,22 @@ fi
 DEST="$VENCORD_DIR/src/userplugins/vocord"
 echo ""
 
+# ── Clean up existing installation if present ─────────────────────
+
+if [[ -d "$DEST" ]]; then
+    echo -e "  ${YELLOW}Existing Vocord installation detected. Removing...${NC}"
+    rm -rf "$DEST"
+    echo -e "  ${GREEN}Old plugin files removed${NC}"
+fi
+
+if [[ -d "$VOCORD_DATA/venv" ]]; then
+    echo -e "  ${YELLOW}Existing venv detected. Removing...${NC}"
+    rm -rf "$VOCORD_DATA/venv"
+    echo -e "  ${GREEN}Old venv removed${NC}"
+fi
+
+echo ""
+
 # ── Step 1: Clone Vocord repo ────────────────────────────────────
 
 echo -e "${BOLD}[1/4]${NC} Downloading Vocord..."
@@ -232,7 +267,7 @@ echo -e "  ${GREEN}Done${NC}"
 
 echo ""
 
-if [[ "$IS_MAC_ARM" == true ]]; then
+if [[ "$BACKEND" == "mlx-whisper" ]]; then
     echo -e "${BOLD}[2/4]${NC} Installing mlx-whisper..."
 
     # Install uv if not present
@@ -311,9 +346,11 @@ if [[ -n "$VESKTOP_DATA" ]]; then
     echo ""
     echo -e "${YELLOW}Closing Vesktop to apply changes...${NC}"
     if [[ "$OS" == "Darwin" ]]; then
-        pkill -x "Vesktop" 2>/dev/null && sleep 2 || true
+        osascript -e 'quit app "Vesktop"' 2>/dev/null || pkill -ix vesktop 2>/dev/null || true
+        sleep 2
     elif [[ "$OS" == "Linux" ]]; then
-        pkill -x "vesktop" 2>/dev/null && sleep 2 || true
+        pkill -ix vesktop 2>/dev/null || true
+        sleep 2
     fi
 fi
 
@@ -329,7 +366,7 @@ cp "$TMPDIR_VOCORD/vocord/index.tsx" "$DEST/"
 cp "$TMPDIR_VOCORD/vocord/native.ts" "$DEST/"
 
 # Copy transcribe-cli with built binary if applicable
-if [[ "$IS_MAC_ARM" != true ]]; then
+if [[ "$BACKEND" == "transcribe-rs" ]]; then
     cp -r "$TMPDIR_VOCORD/vocord/transcribe-cli" "$DEST/"
 fi
 
@@ -382,7 +419,7 @@ echo ""
 if [[ -n "$VESKTOP_DATA" ]]; then
     echo -e "  ${GREEN}Restarting Vesktop...${NC}"
     if [[ "$OS" == "Darwin" ]]; then
-        open -a Vesktop
+        open -a "$(ls -d /Applications/[Vv]esktop.app 2>/dev/null | head -1)" 2>/dev/null || open -a Vesktop 2>/dev/null || true
     elif [[ "$OS" == "Linux" ]]; then
         vesktop &>/dev/null &
     fi
@@ -392,7 +429,7 @@ fi
 echo "  Next steps:"
 echo "    1. Enable: Settings > Vencord > Plugins > Vocord"
 
-if [[ "$IS_MAC_ARM" != true && -f "$MODEL_PATH" ]]; then
+if [[ "$BACKEND" == "transcribe-rs" && -f "$MODEL_PATH" ]]; then
     echo "    2. Set GGML model path in plugin settings:"
     echo "       $MODEL_PATH"
 fi
