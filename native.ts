@@ -14,7 +14,7 @@ import { join } from "path";
 const TEMP_DIR = join(tmpdir(), "vencord-vocord");
 const VOCORD_VENV_PYTHON = join(homedir(), ".local", "share", "vocord", "venv", "bin", "python");
 const MAX_REDIRECTS = 5;
-const ALLOWED_REDIRECT_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];
+const ALLOWED_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];
 const SUBPROCESS_TIMEOUT_MS = 5 * 60 * 1000;
 
 function ensureTempDir(): void {
@@ -64,6 +64,17 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
             return;
         }
 
+        try {
+            const parsed = new URL(url);
+            if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
+                reject(new Error(`Untrusted audio host: ${parsed.hostname}`));
+                return;
+            }
+        } catch {
+            reject(new Error(`Invalid URL: ${url}`));
+            return;
+        }
+
         https.get(url, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (compatible; Vocord/1.0)"
@@ -88,7 +99,7 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
                         reject(new Error(`Redirect to non-HTTPS URL blocked: ${parsed.protocol}`));
                         return;
                     }
-                    if (!ALLOWED_REDIRECT_HOSTS.includes(parsed.hostname)) {
+                    if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
                         reject(new Error(`Redirect to untrusted host blocked: ${parsed.hostname}`));
                         return;
                     }
@@ -148,14 +159,83 @@ async function convertToWav(oggPath: string, ffmpegPath: string): Promise<string
     });
 }
 
-/** Transcribe audio using mlx-whisper via Python (macOS ARM). */
-async function runMlxWhisper(
-    audioPath: string,
-    model: string,
-    language: string
-): Promise<string> {
+interface SubprocessOptions {
+    command: string;
+    args: string[];
+    cleanupPath: string;
+    label: string;
+    /** Which stream to look for JSON error output on non-zero exit. */
+    errorStream?: "stdout" | "stderr";
+    /** Custom handler for ENOENT spawn errors. */
+    enoentMessage?: string;
+}
+
+/** Spawn a subprocess with timeout, collect JSON output, and clean up the audio file. */
+async function runSubprocess(options: SubprocessOptions): Promise<string> {
+    const { command, args, cleanupPath, label, errorStream = "stdout", enoentMessage } = options;
+
     return new Promise((resolve, reject) => {
-        const pythonScript = `
+        const proc = spawn(command, args);
+
+        let stdout = "";
+        let stderr = "";
+        let killed = false;
+
+        const timeout = setTimeout(() => {
+            killed = true;
+            proc.kill();
+        }, SUBPROCESS_TIMEOUT_MS);
+
+        proc.stdout.on("data", data => { stdout += data.toString(); });
+        proc.stderr.on("data", data => { stderr += data.toString(); });
+
+        proc.on("close", code => {
+            clearTimeout(timeout);
+            rmSync(cleanupPath, { force: true });
+
+            if (killed) {
+                reject(new Error(`${label} timed out`));
+                return;
+            }
+
+            if (code !== 0) {
+                const errorOutput = errorStream === "stderr" ? stderr : stdout;
+                try {
+                    const result = JSON.parse(errorOutput.trim());
+                    if (result.error) {
+                        reject(new Error(result.error));
+                        return;
+                    }
+                } catch { /* ignore parse errors */ }
+                reject(new Error(stderr || `${label} exited with code ${code}`));
+                return;
+            }
+
+            try {
+                const result = JSON.parse(stdout.trim());
+                if (result.error) {
+                    reject(new Error(result.error));
+                } else {
+                    resolve(result.text);
+                }
+            } catch {
+                reject(new Error(`Failed to parse ${label} output: ${stdout}`));
+            }
+        });
+
+        proc.on("error", err => {
+            clearTimeout(timeout);
+            rmSync(cleanupPath, { force: true });
+            if (enoentMessage && (err as NodeJS.ErrnoException).code === "ENOENT") {
+                reject(new Error(enoentMessage));
+            } else {
+                reject(err);
+            }
+        });
+    });
+}
+
+const MLX_WHISPER_SCRIPT = `
 import sys
 import json
 
@@ -181,140 +261,41 @@ except Exception as e:
     sys.exit(1)
 `;
 
-        const args = ["-c", pythonScript, audioPath, model];
-        if (language) {
-            args.push(language);
-        }
+/** Transcribe audio using mlx-whisper via Python (macOS ARM). */
+async function runMlxWhisper(audioPath: string, model: string, language: string): Promise<string> {
+    const args = ["-c", MLX_WHISPER_SCRIPT, audioPath, model];
+    if (language) args.push(language);
 
-        const python = existsSync(VOCORD_VENV_PYTHON) ? VOCORD_VENV_PYTHON : "python3";
+    const python = existsSync(VOCORD_VENV_PYTHON) ? VOCORD_VENV_PYTHON : "python3";
 
-        const proc = spawn(python, args);
-
-        let stdout = "";
-        let stderr = "";
-        let killed = false;
-
-        const timeout = setTimeout(() => {
-            killed = true;
-            proc.kill();
-        }, SUBPROCESS_TIMEOUT_MS);
-
-        proc.stdout.on("data", data => { stdout += data.toString(); });
-        proc.stderr.on("data", data => { stderr += data.toString(); });
-
-        proc.on("close", code => {
-            clearTimeout(timeout);
-            rmSync(audioPath, { force: true });
-
-            if (killed) {
-                reject(new Error("mlx-whisper timed out"));
-                return;
-            }
-
-            if (code !== 0) {
-                try {
-                    const result = JSON.parse(stdout.trim());
-                    if (result.error) {
-                        reject(new Error(result.error));
-                        return;
-                    }
-                } catch { /* ignore parse errors */ }
-                reject(new Error(stderr || `python3 exited with code ${code}`));
-                return;
-            }
-
-            try {
-                const result = JSON.parse(stdout.trim());
-                if (result.error) {
-                    reject(new Error(result.error));
-                } else {
-                    resolve(result.text);
-                }
-            } catch {
-                reject(new Error(`Failed to parse mlx-whisper output: ${stdout}`));
-            }
-        });
-
-        proc.on("error", err => {
-            clearTimeout(timeout);
-            rmSync(audioPath, { force: true });
-            reject(err);
-        });
+    return runSubprocess({
+        command: python,
+        args,
+        cleanupPath: audioPath,
+        label: "mlx-whisper",
     });
 }
 
 /** Transcribe audio using transcribe-cli (cross-platform, Rust/whisper.cpp). */
-async function runTranscribeRs(
-    wavPath: string,
-    modelPath: string,
-    language: string
-): Promise<string> {
+async function runTranscribeRs(wavPath: string, modelPath: string, language: string): Promise<string> {
     if (!modelPath) {
         rmSync(wavPath, { force: true });
         throw new Error("No GGML model path configured. Set 'Path to GGML Whisper model file' in Vocord settings.");
     }
 
-    return new Promise((resolve, reject) => {
-        const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
-        const cliPath = join(__dirname, "transcribe-cli", "target", "release", cliBin);
+    const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
+    const cliPath = join(__dirname, "transcribe-cli", "target", "release", cliBin);
 
-        const args = ["--audio", wavPath, "--model", modelPath];
-        if (language) {
-            args.push("--language", language);
-        }
+    const args = ["--audio", wavPath, "--model", modelPath];
+    if (language) args.push("--language", language);
 
-        const proc = spawn(cliPath, args);
-
-        let stdout = "";
-        let stderr = "";
-        let killed = false;
-
-        const timeout = setTimeout(() => {
-            killed = true;
-            proc.kill();
-        }, SUBPROCESS_TIMEOUT_MS);
-
-        proc.stdout.on("data", data => { stdout += data.toString(); });
-        proc.stderr.on("data", data => { stderr += data.toString(); });
-
-        proc.on("close", code => {
-            clearTimeout(timeout);
-            rmSync(wavPath, { force: true });
-
-            if (killed) {
-                reject(new Error("transcribe-cli timed out"));
-                return;
-            }
-
-            if (code !== 0) {
-                try {
-                    const result = JSON.parse(stderr.trim());
-                    if (result.error) {
-                        reject(new Error(result.error));
-                        return;
-                    }
-                } catch { /* ignore parse errors */ }
-                reject(new Error(stderr || `transcribe-cli exited with code ${code}`));
-                return;
-            }
-
-            try {
-                const result = JSON.parse(stdout.trim());
-                resolve(result.text);
-            } catch {
-                reject(new Error(`Failed to parse transcribe-cli output: ${stdout}`));
-            }
-        });
-
-        proc.on("error", err => {
-            clearTimeout(timeout);
-            rmSync(wavPath, { force: true });
-            if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-                reject(new Error("transcribe-cli not found. Build it with: cd transcribe-cli && cargo build --release"));
-            } else {
-                reject(err);
-            }
-        });
+    return runSubprocess({
+        command: cliPath,
+        args,
+        cleanupPath: wavPath,
+        label: "transcribe-cli",
+        errorStream: "stderr",
+        enoentMessage: "transcribe-cli not found. Build it with: cd transcribe-cli && cargo build --release",
     });
 }
 

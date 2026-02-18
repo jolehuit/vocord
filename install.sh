@@ -22,7 +22,6 @@ echo ""
 REPO="https://github.com/jolehuit/vocord.git"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
-IS_MAC_ARM=false
 TMPDIR_VOCORD="$(mktemp -d)"
 VOCORD_DATA="$HOME/.local/share/vocord"
 
@@ -34,7 +33,6 @@ trap cleanup EXIT
 BACKEND="transcribe-rs"
 
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
-    IS_MAC_ARM=true
     echo -e "  ${GREEN}Platform:${NC} macOS Apple Silicon"
     echo ""
     echo -e "  ${BOLD}Choose transcription backend:${NC}"
@@ -50,18 +48,16 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
         BACKEND_CHOICE=""
     fi
     case "$BACKEND_CHOICE" in
-        2) BACKEND="transcribe-rs"; IS_MAC_ARM=false ;;
+        2) BACKEND="transcribe-rs" ;;
         *) BACKEND="mlx-whisper" ;;
     esac
     echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
-elif [[ "$OS" == "Darwin" ]]; then
-    echo -e "  ${GREEN}Platform:${NC} macOS Intel"
-    echo -e "  ${GREEN}Backend:${NC}  transcribe-rs"
-elif [[ "$OS" == "Linux" ]]; then
-    echo -e "  ${GREEN}Platform:${NC} Linux ($ARCH)"
-    echo -e "  ${GREEN}Backend:${NC}  transcribe-rs"
 else
-    echo -e "  ${GREEN}Platform:${NC} $OS ($ARCH)"
+    if [[ "$OS" == "Darwin" ]]; then
+        echo -e "  ${GREEN}Platform:${NC} macOS Intel"
+    else
+        echo -e "  ${GREEN}Platform:${NC} $OS ($ARCH)"
+    fi
     echo -e "  ${GREEN}Backend:${NC}  transcribe-rs"
 fi
 echo ""
@@ -69,29 +65,32 @@ echo ""
 VESKTOP_DATA=""
 DISCORD_APP=""
 
+# ── Helper: detect Vesktop data directory ─────────────────────────
+
+detect_vesktop() {
+    if [[ "$OS" == "Darwin" ]]; then
+        for d in "$HOME/Library/Application Support/vesktop" "$HOME/Library/Application Support/Vesktop"; do
+            [[ -d "$d" ]] && VESKTOP_DATA="$d" && return 0
+        done
+    elif [[ "$OS" == "Linux" ]]; then
+        local xdg="${XDG_CONFIG_HOME:-$HOME/.config}"
+        for d in "$xdg/vesktop" "$xdg/Vesktop"; do
+            [[ -d "$d" ]] && VESKTOP_DATA="$d" && return 0
+        done
+    fi
+    return 1
+}
+
 # ── Helper: configure Vesktop to use a custom Vencord build ──────
 
 configure_vesktop() {
     local dist_dir="$1"
 
-# Find Vesktop data directory
-    if [[ "$OS" == "Darwin" ]]; then
-        for d in "$HOME/Library/Application Support/vesktop" "$HOME/Library/Application Support/Vesktop"; do
-            [[ -d "$d" ]] && VESKTOP_DATA="$d" && break
-        done
-    elif [[ "$OS" == "Linux" ]]; then
-        local xdg="${XDG_CONFIG_HOME:-$HOME/.config}"
-        for d in "$xdg/vesktop" "$xdg/Vesktop"; do
-            [[ -d "$d" ]] && VESKTOP_DATA="$d" && break
-        done
-    fi
-
     [[ -z "$VESKTOP_DATA" ]] && return 1
 
     echo -e "  ${GREEN}Vesktop detected:${NC} $VESKTOP_DATA"
 
-    # Write vencordDir to state.json (newer Vesktop) or settings.json (older)
-    # Try state.json first, fall back to settings.json
+    # Try state.json first (newer Vesktop), fall back to settings.json
     local target_file=""
     if [[ -f "$VESKTOP_DATA/state.json" ]]; then
         target_file="$VESKTOP_DATA/state.json"
@@ -127,8 +126,6 @@ with open(path, 'w') as f:
 # ── Helper: check if Discord Desktop has Vencord injected ────────
 
 check_discord_desktop() {
-    local vencord_dir="$1"
-
     # Check if Discord Desktop is installed
     if [[ "$OS" == "Darwin" ]]; then
         for app in "/Applications/Discord.app" "/Applications/Discord Canary.app" "$HOME/Applications/Discord.app"; do
@@ -149,8 +146,6 @@ check_discord_desktop() {
 }
 
 # ── Find Vencord source ──────────────────────────────────────────
-
-CLONED_VENCORD=false
 
 if [[ -z "$VENCORD_DIR" ]]; then
     # Search common locations (Vencord, Equicord, and common dev dirs)
@@ -234,7 +229,6 @@ else
     pnpm install --frozen-lockfile 2>&1 | tail -3
 
     mkdir -p "$VENCORD_DIR/src/userplugins"
-    CLONED_VENCORD=true
     echo -e "  ${GREEN}Vencord source:${NC} $VENCORD_DIR"
 fi
 
@@ -342,16 +336,17 @@ fi
 
 # ── Close Vesktop before making any changes ───────────────────────
 
+detect_vesktop
+
 if [[ -n "$VESKTOP_DATA" ]]; then
     echo ""
     echo -e "${YELLOW}Closing Vesktop to apply changes...${NC}"
     if [[ "$OS" == "Darwin" ]]; then
         osascript -e 'quit app "Vesktop"' 2>/dev/null || pkill -ix vesktop 2>/dev/null || true
-        sleep 2
-    elif [[ "$OS" == "Linux" ]]; then
+    else
         pkill -ix vesktop 2>/dev/null || true
-        sleep 2
     fi
+    sleep 2
 fi
 
 # ── Step 3: Install plugin ────────────────────────────────────────
@@ -359,7 +354,6 @@ fi
 echo ""
 echo -e "${BOLD}[3/4]${NC} Installing plugin..."
 
-rm -rf "$DEST"
 mkdir -p "$DEST"
 
 cp "$TMPDIR_VOCORD/vocord/index.tsx" "$DEST/"
@@ -401,7 +395,7 @@ echo ""
 configure_vesktop "$VENCORD_DIR/dist" || true
 
 # Check for Discord Desktop and inject if detected and not using Vesktop
-check_discord_desktop "$VENCORD_DIR"
+check_discord_desktop
 [[ -z "$VESKTOP_DATA" && -n "$DISCORD_APP" ]] && {
     echo -e "  ${GREEN}Injecting Vencord into Discord Desktop...${NC}"
     if ! (cd "$VENCORD_DIR" && pnpm inject 2>&1 | tail -5); then

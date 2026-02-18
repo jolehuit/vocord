@@ -49,10 +49,6 @@ const transcriptions = new Map<string, string>();
 const pendingTranscriptions = new Set<string>();
 const processedElements = new WeakSet<Element>();
 
-function getActiveBackend(): string {
-    return settings.store.transcribeBackend;
-}
-
 let observer: MutationObserver | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -63,30 +59,7 @@ const SPINNER_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none"
 const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>`;
 
 function setSvg(el: HTMLElement, svg: string): void {
-    el.innerHTML = svg; // safe: SVG strings are hardcoded constants
-}
-
-function getAudioUrl(element: Element): string | null {
-    const audio = element.querySelector("audio");
-    if (audio?.src) return audio.src;
-    if (audio) {
-        const source = audio.querySelector("source");
-        if (source?.src) return source.src;
-    }
-
-    // Walk up the DOM to find a parent containing an audio element
-    let parent = element.parentElement;
-    for (let i = 0; i < 5 && parent; i++) {
-        const parentAudio = parent.querySelector("audio");
-        if (parentAudio) {
-            if (parentAudio.src) return parentAudio.src;
-            const source = parentAudio.querySelector("source");
-            if (source?.src) return source.src;
-        }
-        parent = parent.parentElement;
-    }
-
-    return null;
+    el.innerHTML = svg;
 }
 
 function getAudioId(url: string): string {
@@ -99,7 +72,7 @@ function getAudioId(url: string): string {
     }
 }
 
-function createTranscribeButton(audioUrl: string, container: Element): HTMLElement {
+function createTranscribeButton(audioUrl: string): HTMLElement {
     const audioId = getAudioId(audioUrl);
 
     const wrapper = document.createElement("div");
@@ -113,7 +86,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
 
     const existingTranscription = transcriptions.get(audioId);
     if (existingTranscription) {
-        const transcriptionBox = createTranscriptionBox(existingTranscription, audioId);
+        const transcriptionBox = createTranscriptionBox(existingTranscription);
         wrapper.appendChild(transcriptionBox);
         return wrapper;
     }
@@ -135,7 +108,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
                 audioUrl,
                 settings.store.whisperModel,
                 settings.store.language,
-                getActiveBackend(),
+                settings.store.transcribeBackend,
                 settings.store.modelPath,
                 settings.store.ffmpegPath
             );
@@ -149,7 +122,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
             } else {
                 transcriptions.set(audioId, result.text);
                 button.style.display = "none";
-                const transcriptionBox = createTranscriptionBox(result.text, audioId);
+                const transcriptionBox = createTranscriptionBox(result.text);
                 wrapper.appendChild(transcriptionBox);
 
                 if (settings.store.showToast) {
@@ -182,7 +155,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
     return wrapper;
 }
 
-function createTranscriptionBox(text: string, audioId: string): HTMLElement {
+function createTranscriptionBox(text: string): HTMLElement {
     const box = document.createElement("div");
     box.className = "vc-vocord-transcription";
 
@@ -231,8 +204,8 @@ function processVoiceMessages(): void {
         processedElements.add(container);
 
         // Place right after the player as a sibling, not inside
-        if (container.parentElement?.querySelector(".vc-vocord-wrapper")) return;
-        const btn = createTranscribeButton(url, container);
+        if (container.nextElementSibling?.classList.contains("vc-vocord-wrapper")) return;
+        const btn = createTranscribeButton(url);
         container.insertAdjacentElement("afterend", btn);
     });
 }
@@ -295,7 +268,7 @@ export default definePlugin({
                 padding: 8px 12px;
                 background: rgba(255, 255, 255, 0.06);
                 border-radius: 8px;
-                width: 400px;
+                max-width: 400px;
                 max-height: 120px;
                 margin-top: 4px;
             }
