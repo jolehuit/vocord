@@ -24,6 +24,7 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 IS_MAC_ARM=false
 TMPDIR_VOCORD="$(mktemp -d)"
+VOCORD_DATA="$HOME/.local/share/vocord"
 
 cleanup() { rm -rf "$TMPDIR_VOCORD"; }
 trap cleanup EXIT
@@ -46,24 +47,112 @@ else
 fi
 echo ""
 
+# ── Helper: configure Vesktop to use a custom Vencord build ──────
+
+configure_vesktop() {
+    local dist_dir="$1"
+
+    # Find Vesktop data directory
+    local vesktop_data=""
+    if [[ "$OS" == "Darwin" ]]; then
+        for d in "$HOME/Library/Application Support/vesktop" "$HOME/Library/Application Support/Vesktop"; do
+            [[ -d "$d" ]] && vesktop_data="$d" && break
+        done
+    elif [[ "$OS" == "Linux" ]]; then
+        local xdg="${XDG_CONFIG_HOME:-$HOME/.config}"
+        for d in "$xdg/vesktop" "$xdg/Vesktop"; do
+            [[ -d "$d" ]] && vesktop_data="$d" && break
+        done
+    fi
+
+    [[ -z "$vesktop_data" ]] && return 1
+
+    echo -e "  ${GREEN}Vesktop detected:${NC} $vesktop_data"
+
+    # Write vencordDir to state.json (newer Vesktop) or settings.json (older)
+    # Try state.json first, fall back to settings.json
+    local target_file=""
+    if [[ -f "$vesktop_data/state.json" ]]; then
+        target_file="$vesktop_data/state.json"
+    elif [[ -f "$vesktop_data/settings.json" ]]; then
+        target_file="$vesktop_data/settings.json"
+    else
+        # No config file exists yet -- create state.json
+        echo '{}' > "$vesktop_data/state.json"
+        target_file="$vesktop_data/state.json"
+    fi
+
+    # Use python3 for reliable JSON manipulation
+    if command -v python3 &> /dev/null; then
+        python3 -c "
+import json, sys
+path, dist = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+data['vencordDir'] = dist
+with open(path, 'w') as f:
+    json.dump(data, f, indent=4)
+    f.write('\n')
+" "$target_file" "$dist_dir"
+        echo -e "  ${GREEN}Vesktop configured:${NC} vencordDir → $dist_dir"
+        return 0
+    else
+        echo -e "  ${YELLOW}python3 not found -- set Vencord location manually in Vesktop:${NC}"
+        echo "    Settings > Developer Options > Vencord Location → $dist_dir"
+        return 1
+    fi
+}
+
+# ── Helper: check if Discord Desktop has Vencord injected ────────
+
+check_discord_desktop() {
+    local vencord_dir="$1"
+
+    # Check if Discord Desktop is installed
+    local discord_found=false
+    if [[ "$OS" == "Darwin" ]]; then
+        for app in "/Applications/Discord.app" "/Applications/Discord Canary.app" "$HOME/Applications/Discord.app"; do
+            [[ -d "$app" ]] && discord_found=true && break
+        done
+    elif [[ "$OS" == "Linux" ]]; then
+        command -v discord &> /dev/null && discord_found=true
+    fi
+
+    if [[ "$discord_found" == true ]]; then
+        echo ""
+        echo -e "  ${CYAN}Discord Desktop detected.${NC}"
+        echo "  If you use Discord Desktop (not Vesktop), inject Vencord:"
+        echo "    cd $vencord_dir && pnpm inject"
+    fi
+}
+
 # ── Find Vencord source ──────────────────────────────────────────
 
+CLONED_VENCORD=false
+
 if [[ -z "$VENCORD_DIR" ]]; then
+    # Search common locations (Vencord, Equicord, and common dev dirs)
     for dir in \
         "$HOME/Vencord" \
         "$HOME/VencordDev" \
         "$HOME/vencord" \
+        "$HOME/Equicord" \
+        "$HOME/equicord" \
         "$HOME/.local/share/Vencord" \
-        "$HOME/Vesktop" \
-        "$HOME/vesktop" \
-        /Applications/Vencord; do
+        "$HOME/Documents/Vencord" \
+        "$HOME/Projects/Vencord" \
+        "$HOME/Dev/Vencord" \
+        "$HOME/dev/Vencord" \
+        "$HOME/Code/Vencord" \
+        "$HOME/code/Vencord" \
+        "$HOME/src/Vencord"; do
         if [[ -d "$dir/src/userplugins" ]]; then
             VENCORD_DIR="$dir"
             break
         fi
     done
 
-    # Also search common dev directories
+    # Wildcard search in home directory
     if [[ -z "$VENCORD_DIR" ]]; then
         for dir in "$HOME"/*/src/userplugins; do
             if [[ -d "$dir" ]]; then
@@ -75,47 +164,70 @@ if [[ -z "$VENCORD_DIR" ]]; then
 fi
 
 if [[ -n "$VENCORD_DIR" && -d "$VENCORD_DIR/src/userplugins" ]]; then
-    DEST="$VENCORD_DIR/src/userplugins/vocord"
-    echo -e "  ${GREEN}Vencord:${NC}  $VENCORD_DIR"
+    echo -e "  ${GREEN}Vencord source:${NC} $VENCORD_DIR"
 else
-    echo -e "${YELLOW}  Vencord source not found automatically.${NC}"
+    echo -e "  ${YELLOW}No Vencord source tree found.${NC}"
     echo ""
-    echo -e "  ${BOLD}Enter the path to your Vencord/Vesktop source directory:${NC}"
-    echo -e "  (the folder containing src/userplugins/)"
-    echo ""
-    read -r -p "  Path: " VENCORD_DIR
 
-    # Expand ~ manually
-    VENCORD_DIR="${VENCORD_DIR/#\~/$HOME}"
-
-    if [[ ! -d "$VENCORD_DIR/src/userplugins" ]]; then
-        echo ""
-        echo -e "${RED}  Error: $VENCORD_DIR/src/userplugins/ does not exist.${NC}"
-        echo ""
-        echo "  Make sure you have Vencord from source:"
-        echo "    git clone https://github.com/Vendicated/Vencord"
-        echo "    cd Vencord && pnpm install"
-        echo ""
-        echo "  Or set the path explicitly:"
-        echo "    VENCORD_DIR=~/path/to/Vencord curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash"
+    # Check prerequisites for cloning
+    if ! command -v git &> /dev/null; then
+        echo -e "${RED}  Error: git is required. Install git and try again.${NC}"
         exit 1
     fi
 
-    DEST="$VENCORD_DIR/src/userplugins/vocord"
-    echo -e "  ${GREEN}Vencord:${NC}  $VENCORD_DIR"
+    if ! command -v node &> /dev/null; then
+        echo -e "${RED}  Error: Node.js is required to build Vencord.${NC}"
+        echo ""
+        if [[ "$OS" == "Darwin" ]]; then
+            echo "  Install it: brew install node"
+        elif [[ "$OS" == "Linux" ]]; then
+            echo "  Install it: https://nodejs.org or use your package manager"
+        fi
+        exit 1
+    fi
+
+    # Install pnpm if needed
+    if ! command -v pnpm &> /dev/null; then
+        echo "  Installing pnpm..."
+        if command -v corepack &> /dev/null; then
+            corepack enable 2>/dev/null || true
+            corepack prepare pnpm@latest --activate 2>/dev/null || npm install -g pnpm
+        else
+            npm install -g pnpm
+        fi
+    fi
+
+    if ! command -v pnpm &> /dev/null; then
+        echo -e "${RED}  Error: Failed to install pnpm.${NC}"
+        exit 1
+    fi
+
+    # Clone Vencord
+    VENCORD_DIR="$HOME/Vencord"
+    echo -e "  ${BOLD}Cloning Vencord to $VENCORD_DIR...${NC}"
+    git clone --depth 1 --quiet "https://github.com/Vendicated/Vencord.git" "$VENCORD_DIR"
+
+    echo "  Installing Vencord dependencies..."
+    cd "$VENCORD_DIR"
+    pnpm install --frozen-lockfile 2>&1 | tail -3
+
+    mkdir -p "$VENCORD_DIR/src/userplugins"
+    CLONED_VENCORD=true
+    echo -e "  ${GREEN}Vencord source:${NC} $VENCORD_DIR"
 fi
+
+DEST="$VENCORD_DIR/src/userplugins/vocord"
 echo ""
 
-# ── Step 1: Clone repo ────────────────────────────────────────────
+# ── Step 1: Clone Vocord repo ────────────────────────────────────
 
 echo -e "${BOLD}[1/4]${NC} Downloading Vocord..."
 git clone --depth 1 --quiet "$REPO" "$TMPDIR_VOCORD/vocord"
 echo -e "  ${GREEN}Done${NC}"
 
-# ── Step 2: Install backend ───────────────────────────────────────
+# ── Step 2: Install backend ──────────────────────────────────────
 
 echo ""
-VOCORD_DATA="$HOME/.local/share/vocord"
 
 if [[ "$IS_MAC_ARM" == true ]]; then
     echo -e "${BOLD}[2/4]${NC} Installing mlx-whisper..."
@@ -177,12 +289,11 @@ else
     fi
 
     # Download model
-    MODEL_DIR="$HOME/.local/share/vocord"
-    MODEL_PATH="$MODEL_DIR/ggml-medium-q4_1.bin"
+    MODEL_PATH="$VOCORD_DATA/ggml-medium-q4_1.bin"
 
     if [[ ! -f "$MODEL_PATH" ]]; then
         echo "  Downloading Whisper model (~500 MB)..."
-        mkdir -p "$MODEL_DIR"
+        mkdir -p "$VOCORD_DATA"
         curl -L --progress-bar -o "$MODEL_PATH" \
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q4_1.bin"
         echo -e "  ${GREEN}Model saved to: $MODEL_PATH${NC}"
@@ -209,10 +320,10 @@ fi
 
 echo -e "  ${GREEN}Installed to: $DEST${NC}"
 
-# ── Step 4: Rebuild Vencord ───────────────────────────────────────
+# ── Step 4: Build and configure ───────────────────────────────────
 
 echo ""
-echo -e "${BOLD}[4/4]${NC} Rebuilding Vencord..."
+echo -e "${BOLD}[4/4]${NC} Building Vencord..."
 
 cd "$VENCORD_DIR"
 if command -v pnpm &> /dev/null; then
@@ -221,6 +332,13 @@ if command -v pnpm &> /dev/null; then
 else
     echo -e "${YELLOW}  pnpm not found -- rebuild manually: cd $VENCORD_DIR && pnpm build${NC}"
 fi
+
+# Auto-configure Vesktop if detected
+echo ""
+configure_vesktop "$VENCORD_DIR/dist" || true
+
+# Check for Discord Desktop
+check_discord_desktop "$VENCORD_DIR"
 
 # ── Done ──────────────────────────────────────────────────────────
 

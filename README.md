@@ -4,21 +4,26 @@ Cross-platform voice message transcription for [Vencord](https://github.com/Vend
 
 ## Quick Start
 
-Make sure you have [Vencord from source](https://github.com/Vendicated/Vencord) installed, then run:
-
 ```bash
 curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
 ```
 
-That's it. The installer handles everything:
-- Detects your platform
-- Installs the right transcription backend:
+That's it. The installer handles everything automatically:
+- Finds your Vencord source tree (or clones it if you don't have one)
+- Detects your platform and installs the right transcription backend:
   - **macOS ARM**: installs [uv](https://github.com/astral-sh/uv), creates an isolated venv, installs mlx-whisper -- no system pollution
-  - **Linux / Windows / macOS Intel**: installs Rust if needed, builds the transcribe-cli binary, downloads a Whisper model -- no Python required
-- Copies the plugin into Vencord
-- Rebuilds Vencord
+  - **Linux / macOS Intel**: installs Rust if needed, builds the transcribe-cli binary, downloads a Whisper model -- no Python required
+- Copies the plugin into Vencord and rebuilds
+- Auto-configures **Vesktop** if detected (sets the custom Vencord build path)
 
-Restart Discord, enable **Vocord** in Settings > Vencord > Plugins, and you're good to go.
+Works with **Vesktop**, **Discord Desktop + Vencord**, and **Equicord** out of the box.
+
+Restart Discord / Vesktop, enable **Vocord** in Settings > Vencord > Plugins, and you're good to go.
+
+> **Tip:** If the installer can't find your Vencord source, you can specify it:
+> ```bash
+> VENCORD_DIR=~/path/to/Vencord curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
+> ```
 
 ## How It Works
 
@@ -83,13 +88,18 @@ If you prefer not to use the one-liner:
      https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q4_1.bin
    ```
 
-4. **Build and restart**:
+4. **Build**:
    ```bash
    cd /path/to/Vencord && pnpm build
    ```
-   Restart Discord, enable Vocord in plugin settings.
 
-5. **For transcribe-rs users**: set the GGML model path in Settings > Plugins > Vocord.
+5. **Connect your client**:
+   - **Vesktop**: Settings > Developer Options > Vencord Location → select `Vencord/dist/`
+   - **Discord Desktop**: `cd /path/to/Vencord && pnpm inject`
+
+6. Restart Discord / Vesktop, enable Vocord in Settings > Vencord > Plugins.
+
+7. **For transcribe-rs users**: set the GGML model path in Settings > Plugins > Vocord.
 
 ## Settings
 
@@ -127,11 +137,12 @@ index.tsx (browser) ---IPC---> native.ts (Node.js)
 
 | Error | Fix |
 |-------|-----|
+| Plugin not showing (Vesktop) | The installer auto-configures Vesktop. If it didn't work: Vesktop Settings > Developer Options > Vencord Location → select your Vencord `dist/` folder |
+| Plugin not showing (Discord) | Rebuild (`cd Vencord && pnpm build`) and inject (`pnpm inject`), then restart Discord |
 | mlx-whisper not installed | `uv pip install --python ~/.local/share/vocord/venv/bin/python mlx-whisper` |
 | ffmpeg not found | `brew install ffmpeg` / `sudo apt install ffmpeg` |
 | transcribe-cli not found | `cd transcribe-cli && cargo build --release` |
 | No GGML model path | Set path in Settings > Plugins > Vocord |
-| Plugin not showing | Rebuild Vencord (`pnpm build`) and restart Discord |
 
 ## License
 
