@@ -212,7 +212,8 @@ async function runTranscribeRs(
     }
 
     return new Promise((resolve, reject) => {
-        const cliPath = join(__dirname, "..", "..", "userplugins", "vocord", "transcribe-cli", "target", "release", "transcribe-cli");
+        const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
+        const cliPath = join(__dirname, "..", "..", "userplugins", "vocord", "transcribe-cli", "target", "release", cliBin);
 
         const args = ["--audio", wavPath, "--model", modelPath];
         if (language) {

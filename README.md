@@ -4,8 +4,14 @@ Cross-platform voice message transcription for [Vencord](https://github.com/Vend
 
 ## Quick Start
 
+**macOS / Linux:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/jolehuit/vocord/main/install.ps1 | iex
 ```
 
 That's it. The installer handles everything automatically:
@@ -16,13 +22,17 @@ That's it. The installer handles everything automatically:
 - Copies the plugin into Vencord and rebuilds
 - Auto-configures **Vesktop** if detected (sets the custom Vencord build path)
 
-Works with **Vesktop**, **Discord Desktop + Vencord**, and **Equicord** out of the box.
+Works with **Vesktop**, **Discord Desktop + Vencord**, and **Equicord** on macOS, Linux, and Windows.
 
 Restart Discord / Vesktop, enable **Vocord** in Settings > Vencord > Plugins, and you're good to go.
 
 > **Tip:** If the installer can't find your Vencord source, you can specify it:
 > ```bash
 > VENCORD_DIR=~/path/to/Vencord curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
+> ```
+> On Windows:
+> ```powershell
+> $env:VENCORD_DIR="C:\path\to\Vencord"; irm https://raw.githubusercontent.com/jolehuit/vocord/main/install.ps1 | iex
 > ```
 
 ## How It Works
