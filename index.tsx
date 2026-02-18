@@ -9,30 +9,6 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Toasts } from "@webpack/common";
 
 const settings = definePluginSettings({
-    transcribeBackend: {
-        type: OptionType.SELECT,
-        description: "Transcription backend (auto detects your platform)",
-        options: [
-            { label: "Auto-detect", value: "auto", default: true },
-            { label: "mlx-whisper (macOS ARM)", value: "mlx-whisper" },
-            { label: "transcribe-rs", value: "transcribe-rs" },
-        ]
-    },
-    whisperModel: {
-        type: OptionType.STRING,
-        description: "Whisper model to use",
-        default: "mlx-community/whisper-large-v3-turbo"
-    },
-    modelPath: {
-        type: OptionType.STRING,
-        description: "Path to GGML Whisper model file (for transcribe-rs backend)",
-        default: ""
-    },
-    ffmpegPath: {
-        type: OptionType.STRING,
-        description: "Path to ffmpeg binary (for audio conversion, leave empty to use system ffmpeg)",
-        default: ""
-    },
     language: {
         type: OptionType.STRING,
         description: "Language code (e.g., 'fr', 'en') or leave empty for auto-detect",
@@ -106,11 +82,7 @@ function createTranscribeButton(audioUrl: string): HTMLElement {
         try {
             const result = await (window as any).VencordNative.pluginHelpers.Vocord.transcribe(
                 audioUrl,
-                settings.store.whisperModel,
-                settings.store.language,
-                settings.store.transcribeBackend,
-                settings.store.modelPath,
-                settings.store.ffmpegPath
+                settings.store.language
             );
 
             if (result.error) {

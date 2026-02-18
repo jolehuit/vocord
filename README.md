@@ -110,18 +110,14 @@ If you prefer not to use the one-liner:
 
 6. Restart Discord / Vesktop, enable Vocord in Settings > Vencord > Plugins.
 
-7. **For transcribe-rs users**: set the GGML model path in Settings > Plugins > Vocord.
-
 ## Settings
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Backend | auto-detect, mlx-whisper, or transcribe-rs | `auto` |
-| Whisper Model | HuggingFace model ID (mlx-whisper) | `mlx-community/whisper-large-v3-turbo` |
-| GGML Model Path | Path to `.bin` model (transcribe-rs) | -- |
-| ffmpeg Path | Custom ffmpeg binary path | system ffmpeg |
-| Language | Language code or empty for auto-detect | auto |
+| Language | Language code (e.g., `fr`, `en`) or empty for auto-detect | auto |
 | Show Toast | Notification on completion | `true` |
+
+Everything else (backend, models, ffmpeg) is auto-detected.
 
 ## Architecture
 

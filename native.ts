@@ -12,7 +12,10 @@ import { arch, homedir, platform, tmpdir } from "os";
 import { join } from "path";
 
 const TEMP_DIR = join(tmpdir(), "vencord-vocord");
-const VOCORD_VENV_PYTHON = join(homedir(), ".local", "share", "vocord", "venv", "bin", "python");
+const VOCORD_DATA = join(homedir(), ".local", "share", "vocord");
+const VOCORD_VENV_PYTHON = join(VOCORD_DATA, "venv", "bin", "python");
+const DEFAULT_GGML_MODEL = join(VOCORD_DATA, "ggml-medium-q4_1.bin");
+const DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo";
 const MAX_REDIRECTS = 5;
 const ALLOWED_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];
 const SUBPROCESS_TIMEOUT_MS = 5 * 60 * 1000;
@@ -130,12 +133,11 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
 }
 
 /** Convert OGG audio to WAV (16kHz, 16-bit, mono) using ffmpeg. */
-async function convertToWav(oggPath: string, ffmpegPath: string): Promise<string> {
+async function convertToWav(oggPath: string): Promise<string> {
     const wavPath = oggPath.replace(/\.ogg$/, ".wav");
-    const ffmpeg = ffmpegPath || "ffmpeg";
 
     return new Promise((resolve, reject) => {
-        execFile(ffmpeg, [
+        execFile("ffmpeg", [
             "-i", oggPath,
             "-ar", "16000",
             "-ac", "1",
@@ -148,7 +150,7 @@ async function convertToWav(oggPath: string, ffmpegPath: string): Promise<string
             if (error) {
                 rmSync(wavPath, { force: true });
                 const msg = stderr?.includes("not found") || error.message.includes("ENOENT")
-                    ? "ffmpeg not found. Please install ffmpeg or set the ffmpeg path in settings."
+                    ? "ffmpeg not found. Install it: brew install ffmpeg (macOS) / sudo apt install ffmpeg (Linux)"
                     : `ffmpeg conversion failed: ${error.message}`;
                 reject(new Error(msg));
                 return;
@@ -277,16 +279,16 @@ async function runMlxWhisper(audioPath: string, model: string, language: string)
 }
 
 /** Transcribe audio using transcribe-cli (cross-platform, Rust/whisper.cpp). */
-async function runTranscribeRs(wavPath: string, modelPath: string, language: string): Promise<string> {
-    if (!modelPath) {
+async function runTranscribeRs(wavPath: string, language: string): Promise<string> {
+    if (!existsSync(DEFAULT_GGML_MODEL)) {
         rmSync(wavPath, { force: true });
-        throw new Error("No GGML model path configured. Set 'Path to GGML Whisper model file' in Vocord settings.");
+        throw new Error(`Whisper model not found at ${DEFAULT_GGML_MODEL}. Re-run the Vocord installer.`);
     }
 
     const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
     const cliPath = join(__dirname, "transcribe-cli", "target", "release", cliBin);
 
-    const args = ["--audio", wavPath, "--model", modelPath];
+    const args = ["--audio", wavPath, "--model", DEFAULT_GGML_MODEL];
     if (language) args.push("--language", language);
 
     return runSubprocess({
@@ -302,14 +304,10 @@ async function runTranscribeRs(wavPath: string, modelPath: string, language: str
 export async function transcribe(
     _event: unknown,
     audioUrl: string,
-    model: string,
-    language: string,
-    backend: string,
-    modelPath: string,
-    ffmpegPath: string
+    language: string
 ): Promise<{ text?: string; error?: string }> {
     try {
-        const resolvedBackend = resolveBackend(backend);
+        const resolvedBackend = resolveBackend("auto");
         console.log(`[Vocord] Backend: ${resolvedBackend} | Downloading audio...`);
 
         const oggPath = await downloadAudio(audioUrl);
@@ -317,14 +315,14 @@ export async function transcribe(
         let text: string;
 
         if (resolvedBackend === "mlx-whisper") {
-            console.log(`[Vocord] Transcribing with mlx-whisper, model: ${model}`);
-            text = await runMlxWhisper(oggPath, model, language);
+            console.log(`[Vocord] Transcribing with mlx-whisper, model: ${DEFAULT_WHISPER_MODEL}`);
+            text = await runMlxWhisper(oggPath, DEFAULT_WHISPER_MODEL, language);
         } else {
             console.log(`[Vocord] Converting OGG to WAV...`);
-            const wavPath = await convertToWav(oggPath, ffmpegPath);
+            const wavPath = await convertToWav(oggPath);
 
-            console.log(`[Vocord] Transcribing with transcribe-rs, model: ${modelPath}`);
-            text = await runTranscribeRs(wavPath, modelPath, language);
+            console.log(`[Vocord] Transcribing with transcribe-rs, model: ${DEFAULT_GGML_MODEL}`);
+            text = await runTranscribeRs(wavPath, language);
         }
 
         console.log(`[Vocord] Transcription complete: ${text.substring(0, 50)}...`);

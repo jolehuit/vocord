@@ -416,10 +416,5 @@ fi
 
 echo "  Next steps:"
 echo "    1. Enable: Settings > Vencord > Plugins > Vocord"
-
-if [[ "$BACKEND" == "transcribe-rs" && -f "$MODEL_PATH" ]]; then
-    echo "    2. Set GGML model path in plugin settings:"
-    echo "       $MODEL_PATH"
-fi
-
+echo "    2. Click the mic icon next to any voice message"
 echo ""
