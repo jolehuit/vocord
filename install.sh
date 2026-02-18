@@ -47,39 +47,40 @@ else
 fi
 echo ""
 
+VESKTOP_DATA=""
+
 # ── Helper: configure Vesktop to use a custom Vencord build ──────
 
 configure_vesktop() {
     local dist_dir="$1"
 
-    # Find Vesktop data directory
-    local vesktop_data=""
+# Find Vesktop data directory
     if [[ "$OS" == "Darwin" ]]; then
         for d in "$HOME/Library/Application Support/vesktop" "$HOME/Library/Application Support/Vesktop"; do
-            [[ -d "$d" ]] && vesktop_data="$d" && break
+            [[ -d "$d" ]] && VESKTOP_DATA="$d" && break
         done
     elif [[ "$OS" == "Linux" ]]; then
         local xdg="${XDG_CONFIG_HOME:-$HOME/.config}"
         for d in "$xdg/vesktop" "$xdg/Vesktop"; do
-            [[ -d "$d" ]] && vesktop_data="$d" && break
+            [[ -d "$d" ]] && VESKTOP_DATA="$d" && break
         done
     fi
 
-    [[ -z "$vesktop_data" ]] && return 1
+    [[ -z "$VESKTOP_DATA" ]] && return 1
 
-    echo -e "  ${GREEN}Vesktop detected:${NC} $vesktop_data"
+    echo -e "  ${GREEN}Vesktop detected:${NC} $VESKTOP_DATA"
 
     # Write vencordDir to state.json (newer Vesktop) or settings.json (older)
     # Try state.json first, fall back to settings.json
     local target_file=""
-    if [[ -f "$vesktop_data/state.json" ]]; then
-        target_file="$vesktop_data/state.json"
-    elif [[ -f "$vesktop_data/settings.json" ]]; then
-        target_file="$vesktop_data/settings.json"
+    if [[ -f "$VESKTOP_DATA/state.json" ]]; then
+        target_file="$VESKTOP_DATA/state.json"
+    elif [[ -f "$VESKTOP_DATA/settings.json" ]]; then
+        target_file="$VESKTOP_DATA/settings.json"
     else
         # No config file exists yet -- create state.json
-        echo '{}' > "$vesktop_data/state.json"
-        target_file="$vesktop_data/state.json"
+        echo '{}' > "$VESKTOP_DATA/state.json"
+        target_file="$VESKTOP_DATA/state.json"
     fi
 
     # Use python3 for reliable JSON manipulation
@@ -325,6 +326,16 @@ echo -e "  ${GREEN}Installed to: $DEST${NC}"
 echo ""
 echo -e "${BOLD}[4/4]${NC} Building Vencord..."
 
+# Close Vesktop before building
+if [[ -n "$VESKTOP_DATA" ]]; then
+    echo "  Closing Vesktop for build..."
+    if [[ "$OS" == "Darwin" ]]; then
+        pkill -x "Vesktop" 2>/dev/null && sleep 1 || true
+    elif [[ "$OS" == "Linux" ]]; then
+        pkill -x "vesktop" 2>/dev/null && sleep 1 || true
+    fi
+fi
+
 cd "$VENCORD_DIR"
 if command -v pnpm &> /dev/null; then
     pnpm build 2>&1 | tail -3
@@ -345,12 +356,25 @@ check_discord_desktop "$VENCORD_DIR"
 echo ""
 echo -e "${GREEN}${BOLD}  Vocord installed successfully!${NC}"
 echo ""
+
+# Restart Vesktop if detected
+if [[ -n "$VESKTOP_DATA" ]]; then
+    echo -e "  Restarting Vesktop..."
+    if [[ "$OS" == "Darwin" ]]; then
+        pkill -x "Vesktop" 2>/dev/null && sleep 1 || true
+        open -a Vesktop
+    elif [[ "$OS" == "Linux" ]]; then
+        pkill -x "vesktop" 2>/dev/null && sleep 1 || true
+        vesktop &>/dev/null &
+    fi
+    echo ""
+fi
+
 echo "  Next steps:"
-echo "    1. Restart Discord / Vesktop"
-echo "    2. Enable: Settings > Vencord > Plugins > Vocord"
+echo "    1. Enable: Settings > Vencord > Plugins > Vocord"
 
 if [[ "$IS_MAC_ARM" != true && -f "$MODEL_PATH" ]]; then
-    echo "    3. Set GGML model path in plugin settings:"
+    echo "    2. Set GGML model path in plugin settings:"
     echo "       $MODEL_PATH"
 fi
 
