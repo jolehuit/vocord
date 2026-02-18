@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Vocord - One-line installer
-# Usage: curl -sSLO https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh && bash install.sh
-# Override Vencord path: VENCORD_DIR=~/my/vencord bash install.sh
+# Usage: curl -sSL https://raw.githubusercontent.com/jolehuit/vocord/main/install.sh | bash
+# Override Vencord path: VENCORD_DIR=~/my/vencord curl -sSL ... | bash
 
 set -eo pipefail
 
