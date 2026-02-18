@@ -49,6 +49,8 @@ function Configure-Vesktop {
     return $true
 }
 
+try {
+
 # ── Find Vencord source ──────────────────────────────────────────
 
 $VencordDir = $env:VENCORD_DIR
@@ -233,10 +235,6 @@ Pop-Location
 Write-Host ""
 Configure-Vesktop -DistDir "$VencordDir\dist" | Out-Null
 
-# ── Cleanup ───────────────────────────────────────────────────────
-
-Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
-
 # ── Done ──────────────────────────────────────────────────────────
 
 Write-Host ""
@@ -248,3 +246,8 @@ Write-Host "    2. Enable: Settings > Vencord > Plugins > Vocord"
 Write-Host "    3. Set GGML model path in plugin settings:"
 Write-Host "       $ModelPath"
 Write-Host ""
+
+} finally {
+    # ── Cleanup ───────────────────────────────────────────────────────
+    Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
+}

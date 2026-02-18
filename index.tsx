@@ -45,12 +45,10 @@ const settings = definePluginSettings({
     }
 });
 
-// State to track transcriptions and pending operations
 const transcriptions = new Map<string, string>();
 const pendingTranscriptions = new Set<string>();
 const processedElements = new WeakSet<Element>();
 
-// Runtime backend override for quick toggle (null = use settings)
 let backendOverride: "mlx-whisper" | "transcribe-rs" | null = null;
 
 function getActiveBackend(): string {
@@ -58,24 +56,40 @@ function getActiveBackend(): string {
 }
 
 let observer: MutationObserver | null = null;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-// Extract audio URL from a voice message element
+const MICROPHONE_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line><line x1="8" x2="16" y1="22" y2="22"></line></svg>`;
+
+const SPINNER_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>`;
+
+const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>`;
+
+function setSvg(el: Element, svg: string): void {
+    const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
+    const svgEl = parsed.documentElement;
+    el.replaceChildren(document.importNode(svgEl, true));
+}
+
+function getBackendLabel(backend: string): string {
+    switch (backend) {
+        case "mlx-whisper": return "MLX";
+        case "transcribe-rs": return "RS";
+        default: return "AUTO";
+    }
+}
+
 function getAudioUrl(element: Element): string | null {
-    // Try to find audio source in the voice message
     const audio = element.querySelector("audio");
     if (audio?.src) return audio.src;
 
-    // Try data attributes
     const wrapper = element.closest("[class*='voiceMessage']") ||
                     element.closest("[class*='audioControls']") ||
                     element.closest("[class*='waveformContainer']");
 
     if (wrapper) {
-        // Look for audio in parent
         const parentAudio = wrapper.querySelector("audio");
         if (parentAudio?.src) return parentAudio.src;
 
-        // Check for source element
         const source = wrapper.querySelector("source");
         if (source?.src) return source.src;
     }
@@ -83,39 +97,25 @@ function getAudioUrl(element: Element): string | null {
     return null;
 }
 
-// Create the backend toggle button
+function updateToggleElement(el: Element): void {
+    const active = getActiveBackend();
+    el.textContent = getBackendLabel(active);
+    (el as HTMLElement).title = `Backend: ${active} (click to switch)`;
+    el.setAttribute("data-backend", active);
+}
+
 function createBackendToggle(): HTMLElement {
     const toggle = document.createElement("button");
     toggle.className = "vc-vocord-toggle";
-
-    function update() {
-        const active = getActiveBackend();
-        const label = active === "mlx-whisper" ? "MLX" : active === "transcribe-rs" ? "RS" : "AUTO";
-        toggle.textContent = label;
-        toggle.title = `Backend: ${active} (click to switch)`;
-        toggle.setAttribute("data-backend", active);
-    }
-
-    update();
+    updateToggleElement(toggle);
 
     toggle.addEventListener("click", e => {
         e.preventDefault();
         e.stopPropagation();
 
-        if (backendOverride === null || backendOverride === "mlx-whisper") {
-            backendOverride = "transcribe-rs";
-        } else {
-            backendOverride = "mlx-whisper";
-        }
+        backendOverride = backendOverride === "transcribe-rs" ? "mlx-whisper" : "transcribe-rs";
 
-        // Update all toggles on the page
-        document.querySelectorAll(".vc-vocord-toggle").forEach(el => {
-            const active = getActiveBackend();
-            const label = active === "mlx-whisper" ? "MLX" : "RS";
-            el.textContent = label;
-            (el as HTMLElement).title = `Backend: ${active} (click to switch)`;
-            el.setAttribute("data-backend", active);
-        });
+        document.querySelectorAll(".vc-vocord-toggle").forEach(updateToggleElement);
 
         Toasts.show({
             message: `Backend: ${backendOverride}`,
@@ -127,9 +127,18 @@ function createBackendToggle(): HTMLElement {
     return toggle;
 }
 
-// Create the transcribe button element
+function getAudioId(url: string): string {
+    // Use the full path (without query params) as a stable ID
+    try {
+        const parsed = new URL(url);
+        return parsed.pathname;
+    } catch {
+        return url.split("?")[0];
+    }
+}
+
 function createTranscribeButton(audioUrl: string, container: Element): HTMLElement {
-    const audioId = audioUrl.split("?")[0].split("/").pop() || audioUrl;
+    const audioId = getAudioId(audioUrl);
 
     const wrapper = document.createElement("div");
     wrapper.className = "vc-vocord-wrapper";
@@ -141,20 +150,12 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
     const button = document.createElement("button");
     button.className = "vc-vocord-btn";
     button.title = "Transcribe voice message";
-    button.innerHTML = `
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-            <line x1="12" x2="12" y1="19" y2="22"></line>
-            <line x1="8" x2="16" y1="22" y2="22"></line>
-        </svg>
-    `;
+    setSvg(button, MICROPHONE_SVG);
 
     const toggle = createBackendToggle();
     btnRow.appendChild(button);
     btnRow.appendChild(toggle);
 
-    // Check if already transcribed
     const existingTranscription = transcriptions.get(audioId);
     if (existingTranscription) {
         const transcriptionBox = createTranscriptionBox(existingTranscription, audioId);
@@ -172,11 +173,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
         pendingTranscriptions.add(audioId);
         button.disabled = true;
         button.classList.add("transcribing");
-        button.innerHTML = `
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-            </svg>
-        `;
+        setSvg(button, SPINNER_SVG);
         button.title = "Transcribing...";
 
         try {
@@ -197,8 +194,6 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
                 });
             } else {
                 transcriptions.set(audioId, result.text);
-
-                // Add transcription box
                 const transcriptionBox = createTranscriptionBox(result.text, audioId);
                 wrapper.appendChild(transcriptionBox);
 
@@ -221,14 +216,7 @@ function createTranscribeButton(audioUrl: string, container: Element): HTMLEleme
             pendingTranscriptions.delete(audioId);
             button.disabled = false;
             button.classList.remove("transcribing");
-            button.innerHTML = `
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" x2="12" y1="19" y2="22"></line>
-                    <line x1="8" x2="16" y1="22" y2="22"></line>
-                </svg>
-            `;
+            setSvg(button, MICROPHONE_SVG);
             button.title = "Transcribe voice message";
         }
     });
@@ -248,23 +236,25 @@ function createTranscriptionBox(text: string, audioId: string): HTMLElement {
     const copyBtn = document.createElement("button");
     copyBtn.className = "vc-vocord-transcription-copy";
     copyBtn.title = "Copy transcription";
-    copyBtn.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
-            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
-        </svg>
-    `;
+    setSvg(copyBtn, COPY_SVG);
     copyBtn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        navigator.clipboard.writeText(text);
-        if (settings.store.showToast) {
+        navigator.clipboard.writeText(text).then(() => {
+            if (settings.store.showToast) {
+                Toasts.show({
+                    message: "Copied to clipboard!",
+                    type: Toasts.Type.SUCCESS,
+                    id: Toasts.genId()
+                });
+            }
+        }).catch(() => {
             Toasts.show({
-                message: "Copied to clipboard!",
-                type: Toasts.Type.SUCCESS,
+                message: "Failed to copy to clipboard",
+                type: Toasts.Type.FAILURE,
                 id: Toasts.genId()
             });
-        }
+        });
     });
 
     box.appendChild(textSpan);
@@ -272,10 +262,7 @@ function createTranscriptionBox(text: string, audioId: string): HTMLElement {
     return box;
 }
 
-// Process voice messages and add transcribe buttons
-function processVoiceMessages() {
-    // Find all voice message containers
-    // Discord uses various class names, we try multiple selectors
+function processVoiceMessages(): void {
     const selectors = [
         "[class*='voiceMessage']",
         "[class*='audioControls']",
@@ -286,31 +273,23 @@ function processVoiceMessages() {
     const voiceMessages = document.querySelectorAll(selectors.join(","));
 
     voiceMessages.forEach(vm => {
-        // Skip if already processed
         if (processedElements.has(vm)) return;
 
-        // Check if this element contains audio
         const audioUrl = getAudioUrl(vm);
         if (!audioUrl) return;
-
-        // Skip if button already exists
         if (vm.querySelector(".vc-vocord-wrapper")) return;
 
-        // Mark as processed
         processedElements.add(vm);
 
-        // Find a good place to insert the button
         const controlsContainer = vm.querySelector("[class*='controls']") ||
                                    vm.querySelector("[class*='buttons']") ||
                                    vm;
 
         const button = createTranscribeButton(audioUrl, vm);
 
-        // Insert the button
         if (controlsContainer && controlsContainer !== vm) {
             controlsContainer.appendChild(button);
         } else {
-            // Append after the voice message element
             vm.parentElement?.insertBefore(button, vm.nextSibling);
         }
     });
@@ -323,7 +302,6 @@ export default definePlugin({
     settings,
 
     start() {
-        // Add styles
         const style = document.createElement("style");
         style.id = "vc-vocord-styles";
         style.textContent = `
@@ -445,21 +423,12 @@ export default definePlugin({
         `;
         document.head.appendChild(style);
 
-        // Initial processing
         processVoiceMessages();
 
-        // Set up MutationObserver to watch for new voice messages
-        observer = new MutationObserver((mutations) => {
-            let shouldProcess = false;
-            for (const mutation of mutations) {
-                if (mutation.addedNodes.length > 0) {
-                    shouldProcess = true;
-                    break;
-                }
-            }
-            if (shouldProcess) {
-                // Debounce processing
-                setTimeout(processVoiceMessages, 100);
+        observer = new MutationObserver(mutations => {
+            if (mutations.some(m => m.addedNodes.length > 0)) {
+                if (debounceTimer) clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(processVoiceMessages, 200);
             }
         });
 
@@ -472,19 +441,18 @@ export default definePlugin({
     },
 
     stop() {
-        // Remove observer
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
         if (observer) {
             observer.disconnect();
             observer = null;
         }
 
-        // Remove styles
         document.getElementById("vc-vocord-styles")?.remove();
-
-        // Remove all transcribe buttons
         document.querySelectorAll(".vc-vocord-wrapper").forEach(el => el.remove());
 
-        // Clear state
         transcriptions.clear();
         pendingTranscriptions.clear();
         backendOverride = null;

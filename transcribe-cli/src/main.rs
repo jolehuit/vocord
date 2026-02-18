@@ -55,13 +55,13 @@ fn main() {
     match run(args) {
         Ok(text) => {
             let output = SuccessOutput { text };
-            println!("{}", serde_json::to_string(&output).unwrap());
+            println!("{}", serde_json::to_string(&output).expect("failed to serialize output"));
         }
         Err(e) => {
             let output = ErrorOutput {
                 error: e.to_string(),
             };
-            eprintln!("{}", serde_json::to_string(&output).unwrap());
+            eprintln!("{}", serde_json::to_string(&output).expect("failed to serialize error"));
             process::exit(1);
         }
     }
