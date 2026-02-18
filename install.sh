@@ -36,14 +36,14 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo -e "  ${GREEN}Platform:${NC} macOS Apple Silicon"
     echo ""
     echo -e "  ${BOLD}Choose transcription backend:${NC}"
-    echo -e "    ${CYAN}1)${NC} mlx-whisper  — fast, uses Apple GPU (recommended)"
-    echo -e "    ${CYAN}2)${NC} transcribe-rs — Rust/whisper.cpp, CPU-based"
+    echo -e "    ${CYAN}1)${NC} parakeet-mlx  — fast, uses Apple GPU (recommended)"
+    echo -e "    ${CYAN}2)${NC} parakeet-onnx — Rust/ONNX, CPU-based"
     echo ""
     printf "  Choice [1]: " >/dev/tty
     read -r BACKEND_CHOICE </dev/tty || BACKEND_CHOICE=""
     case "$BACKEND_CHOICE" in
         2) BACKEND="transcribe-rs" ;;
-        *) BACKEND="mlx-whisper" ;;
+        *) BACKEND="parakeet-mlx" ;;
     esac
     echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
 else
@@ -255,8 +255,8 @@ echo -e "  ${GREEN}Done${NC}"
 
 echo ""
 
-if [[ "$BACKEND" == "mlx-whisper" ]]; then
-    echo -e "${BOLD}[2/4]${NC} Installing mlx-whisper..."
+if [[ "$BACKEND" == "parakeet-mlx" ]]; then
+    echo -e "${BOLD}[2/4]${NC} Installing parakeet-mlx..."
 
     # Install uv if not present
     if ! command -v uv &> /dev/null; then
@@ -266,17 +266,17 @@ if [[ "$BACKEND" == "mlx-whisper" ]]; then
     fi
     echo -e "  uv $(uv --version | cut -d' ' -f2)"
 
-    # Create isolated venv and install mlx-whisper
+    # Create isolated venv and install parakeet-mlx
     VOCORD_VENV="$VOCORD_DATA/venv"
     echo "  Creating venv at $VOCORD_VENV..."
     uv venv "$VOCORD_VENV" --quiet --allow-existing
-    echo "  Installing mlx-whisper (this may take a moment)..."
-    uv pip install --python "$VOCORD_VENV/bin/python" mlx-whisper --quiet
+    echo "  Installing parakeet-mlx (this may take a moment)..."
+    uv pip install --python "$VOCORD_VENV/bin/python" parakeet-mlx --quiet
 
-    if "$VOCORD_VENV/bin/python" -c "import mlx_whisper" 2>/dev/null; then
-        echo -e "  ${GREEN}mlx-whisper installed in isolated venv${NC}"
+    if "$VOCORD_VENV/bin/python" -c "import parakeet_mlx" 2>/dev/null; then
+        echo -e "  ${GREEN}parakeet-mlx installed in isolated venv${NC}"
     else
-        echo -e "${RED}Error: Failed to install mlx-whisper${NC}"
+        echo -e "${RED}Error: Failed to install parakeet-mlx${NC}"
         exit 1
     fi
 else

@@ -13,9 +13,9 @@ import { join } from "path";
 
 const TEMP_DIR = join(tmpdir(), "vencord-vocord");
 const VOCORD_DATA = join(homedir(), ".local", "share", "vocord");
-const VOCORD_VENV_PYTHON = join(VOCORD_DATA, "venv", "bin", "python");
+const VOCORD_VENV_BIN = join(VOCORD_DATA, "venv", "bin");
 const DEFAULT_PARAKEET_MODEL = join(VOCORD_DATA, "parakeet-v3-int8");
-const DEFAULT_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo";
+const DEFAULT_MLX_MODEL = "mlx-community/parakeet-tdt-0.6b-v3";
 const MAX_REDIRECTS = 5;
 const ALLOWED_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];
 const SUBPROCESS_TIMEOUT_MS = 5 * 60 * 1000;
@@ -43,11 +43,8 @@ function isMacAppleSilicon(): boolean {
     return platform() === "darwin" && arch() === "arm64";
 }
 
-function resolveBackend(backend: string): "mlx-whisper" | "transcribe-rs" {
-    if (backend === "mlx-whisper") return "mlx-whisper";
-    if (backend === "transcribe-rs") return "transcribe-rs";
-    // auto-detect
-    return isMacAppleSilicon() ? "mlx-whisper" : "transcribe-rs";
+function resolveBackend(): "parakeet-mlx" | "transcribe-rs" {
+    return isMacAppleSilicon() ? "parakeet-mlx" : "transcribe-rs";
 }
 
 async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
@@ -170,11 +167,13 @@ interface SubprocessOptions {
     errorStream?: "stdout" | "stderr";
     /** Custom handler for ENOENT spawn errors. */
     enoentMessage?: string;
+    /** If true, return stdout as plain text instead of parsing JSON. */
+    rawOutput?: boolean;
 }
 
 /** Spawn a subprocess with timeout, collect JSON output, and clean up the audio file. */
 async function runSubprocess(options: SubprocessOptions): Promise<string> {
-    const { command, args, cleanupPath, label, errorStream = "stdout", enoentMessage } = options;
+    const { command, args, cleanupPath, label, errorStream = "stdout", enoentMessage, rawOutput = false } = options;
 
     return new Promise((resolve, reject) => {
         const proc = spawn(command, args);
@@ -213,15 +212,24 @@ async function runSubprocess(options: SubprocessOptions): Promise<string> {
                 return;
             }
 
-            try {
-                const result = JSON.parse(stdout.trim());
-                if (result.error) {
-                    reject(new Error(result.error));
+            if (rawOutput) {
+                const text = stdout.trim();
+                if (!text) {
+                    reject(new Error(`${label} produced no output`));
                 } else {
-                    resolve(result.text);
+                    resolve(text);
                 }
-            } catch {
-                reject(new Error(`Failed to parse ${label} output: ${stdout}`));
+            } else {
+                try {
+                    const result = JSON.parse(stdout.trim());
+                    if (result.error) {
+                        reject(new Error(result.error));
+                    } else {
+                        resolve(result.text);
+                    }
+                } catch {
+                    reject(new Error(`Failed to parse ${label} output: ${stdout}`));
+                }
             }
         });
 
@@ -237,44 +245,21 @@ async function runSubprocess(options: SubprocessOptions): Promise<string> {
     });
 }
 
-const MLX_WHISPER_SCRIPT = `
-import sys
-import json
+/** Transcribe audio using parakeet-mlx (macOS ARM). */
+async function runParakeetMlx(audioPath: string, language: string): Promise<string> {
+    const venvBin = join(VOCORD_VENV_BIN, "parakeet-mlx");
+    const bin = existsSync(venvBin) ? venvBin : "parakeet-mlx";
 
-try:
-    import mlx_whisper
-except ImportError:
-    print(json.dumps({"error": "mlx-whisper not installed. Run the Vocord installer or: uv pip install mlx-whisper"}))
-    sys.exit(1)
-
-audio_path = sys.argv[1]
-model = sys.argv[2]
-language = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
-
-try:
-    kwargs = {"path_or_hf_repo": model}
-    if language:
-        kwargs["language"] = language
-
-    result = mlx_whisper.transcribe(audio_path, **kwargs)
-    print(json.dumps({"text": result["text"].strip()}))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-    sys.exit(1)
-`;
-
-/** Transcribe audio using mlx-whisper via Python (macOS ARM). */
-async function runMlxWhisper(audioPath: string, model: string, language: string): Promise<string> {
-    const args = ["-c", MLX_WHISPER_SCRIPT, audioPath, model];
-    if (language) args.push(language);
-
-    const python = existsSync(VOCORD_VENV_PYTHON) ? VOCORD_VENV_PYTHON : "python3";
+    const args = [audioPath, "--model", DEFAULT_MLX_MODEL];
+    if (language) args.push("--language", language);
 
     return runSubprocess({
-        command: python,
+        command: bin,
         args,
         cleanupPath: audioPath,
-        label: "mlx-whisper",
+        label: "parakeet-mlx",
+        rawOutput: true,
+        enoentMessage: "parakeet-mlx not found. Re-run the Vocord installer or: pip install parakeet-mlx",
     });
 }
 
@@ -307,21 +292,21 @@ export async function transcribe(
     language: string
 ): Promise<{ text?: string; error?: string }> {
     try {
-        const resolvedBackend = resolveBackend("auto");
-        console.log(`[Vocord] Backend: ${resolvedBackend} | Downloading audio...`);
+        const backend = resolveBackend();
+        console.log(`[Vocord] Backend: ${backend} | Downloading audio...`);
 
         const oggPath = await downloadAudio(audioUrl);
 
         let text: string;
 
-        if (resolvedBackend === "mlx-whisper") {
-            console.log(`[Vocord] Transcribing with mlx-whisper, model: ${DEFAULT_WHISPER_MODEL}`);
-            text = await runMlxWhisper(oggPath, DEFAULT_WHISPER_MODEL, language);
+        if (backend === "parakeet-mlx") {
+            console.log(`[Vocord] Transcribing with parakeet-mlx, model: ${DEFAULT_MLX_MODEL}`);
+            text = await runParakeetMlx(oggPath, language);
         } else {
             console.log(`[Vocord] Converting OGG to WAV...`);
             const wavPath = await convertToWav(oggPath);
 
-            console.log(`[Vocord] Transcribing with Parakeet, model: ${DEFAULT_PARAKEET_MODEL}`);
+            console.log(`[Vocord] Transcribing with Parakeet ONNX, model: ${DEFAULT_PARAKEET_MODEL}`);
             text = await runTranscribeRs(wavPath, language);
         }
 

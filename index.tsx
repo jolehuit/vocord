@@ -184,7 +184,7 @@ function processVoiceMessages(): void {
 
 export default definePlugin({
     name: "Vocord",
-    description: "Transcribe Discord voice messages locally using Whisper AI (mlx-whisper on macOS ARM, transcribe-rs on other platforms)",
+    description: "Transcribe Discord voice messages locally using Parakeet AI (parakeet-mlx on macOS ARM, transcribe-rs on other platforms)",
     authors: [{ name: "jolehuit", id: 0n }],
     settings,
 
