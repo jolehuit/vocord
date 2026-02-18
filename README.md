@@ -16,11 +16,12 @@ irm https://raw.githubusercontent.com/jolehuit/vocord/main/install.ps1 | iex
 
 That's it. The installer handles everything automatically:
 - Finds your Vencord source tree (or clones it if you don't have one)
-- Detects your platform and installs the right transcription backend:
-  - **macOS ARM**: installs [uv](https://github.com/astral-sh/uv), creates an isolated venv, installs mlx-whisper -- no system pollution
-  - **Linux / macOS Intel**: installs Rust if needed, builds the transcribe-cli binary, downloads a Whisper model -- no Python required
-- Copies the plugin into Vencord and rebuilds
-- Auto-configures **Vesktop** if detected (sets the custom Vencord build path)
+- **macOS ARM**: lets you choose between mlx-whisper (GPU, recommended) and transcribe-rs (CPU)
+- **Linux / macOS Intel / Windows**: installs Rust if needed, builds the transcribe-cli binary, downloads a Whisper model
+- Cleans up any existing Vocord installation before reinstalling
+- Copies the plugin into Vencord and rebuilds (verifies Vocord is in the build output)
+- Auto-configures **Vesktop** if detected (closes it, sets the custom Vencord build path, restarts it)
+- Auto-injects into **Discord Desktop** if Vesktop is not found
 
 Works with **Vesktop**, **Discord Desktop + Vencord**, and **Equicord** on macOS, Linux, and Windows.
 
@@ -42,7 +43,7 @@ Restart Discord / Vesktop, enable **Vocord** in Settings > Vencord > Plugins, an
 | macOS Apple Silicon | [mlx-whisper](https://github.com/ml-explore/mlx-examples) | GPU-accelerated via Apple MLX |
 | Linux / Windows / macOS Intel | [transcribe-rs](https://github.com/cjpais/transcribe-rs) | whisper.cpp via Rust (Metal/Vulkan GPU) |
 
-The backend is auto-detected. You can also switch manually via the **MLX/RS** toggle button next to each voice message, or in the plugin settings.
+The installer lets you choose your backend on macOS Apple Silicon. On other platforms, transcribe-rs is used automatically. You can also switch in the plugin settings.
 
 ## Features
 
@@ -50,7 +51,7 @@ The backend is auto-detected. You can also switch manually via the **MLX/RS** to
 - 100% local -- no data sent to external servers
 - Auto language detection (or set a specific language)
 - Copy transcription to clipboard
-- Live backend toggle (MLX / RS) for A/B testing
+- Clean reinstall -- re-running the installer removes the old version automatically
 
 ## Manual Install
 
@@ -77,7 +78,7 @@ If you prefer not to use the one-liner:
    curl -LsSf https://astral.sh/uv/install.sh | sh
 
    # Create isolated venv and install mlx-whisper
-   uv venv ~/.local/share/vocord/venv
+   uv venv ~/.local/share/vocord/venv --allow-existing
    uv pip install --python ~/.local/share/vocord/venv/bin/python mlx-whisper
    ```
 
