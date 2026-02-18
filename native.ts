@@ -14,7 +14,7 @@ import { join } from "path";
 const TEMP_DIR = join(tmpdir(), "vencord-vocord");
 const VOCORD_DATA = join(homedir(), ".local", "share", "vocord");
 const VOCORD_VENV_BIN = join(VOCORD_DATA, "venv", "bin");
-const DEFAULT_PARAKEET_MODEL = join(VOCORD_DATA, "parakeet-v3-int8");
+const DEFAULT_PARAKEET_MODEL = join(VOCORD_DATA, "parakeet-tdt-0.6b-v3-int8");
 const DEFAULT_MLX_MODEL = "mlx-community/parakeet-tdt-0.6b-v3";
 const MAX_REDIRECTS = 5;
 const ALLOWED_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];

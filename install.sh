@@ -319,7 +319,7 @@ else
     fi
 
     # Download Parakeet model
-    MODEL_DIR="$VOCORD_DATA/parakeet-v3-int8"
+    MODEL_DIR="$VOCORD_DATA/parakeet-tdt-0.6b-v3-int8"
 
     if [[ ! -d "$MODEL_DIR" ]]; then
         echo "  Downloading Parakeet v3 int8 model (~200 MB)..."
