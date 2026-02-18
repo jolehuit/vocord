@@ -1,0 +1,13 @@
+[package]
+name = "transcribe-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI wrapper around transcribe-rs whisper engine for voice message transcription"
+
+[dependencies]
+# Local path for development. To use the crates.io version instead:
+# transcribe-rs = { version = "0.2", features = ["whisper"] }
+transcribe-rs = { path = "/tmp/transcribe-rs", features = ["whisper"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
