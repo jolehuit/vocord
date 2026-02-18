@@ -48,6 +48,7 @@ fi
 echo ""
 
 VESKTOP_DATA=""
+DISCORD_APP=""
 
 # ── Helper: configure Vesktop to use a custom Vencord build ──────
 
@@ -110,20 +111,21 @@ check_discord_desktop() {
     local vencord_dir="$1"
 
     # Check if Discord Desktop is installed
-    local discord_found=false
     if [[ "$OS" == "Darwin" ]]; then
         for app in "/Applications/Discord.app" "/Applications/Discord Canary.app" "$HOME/Applications/Discord.app"; do
-            [[ -d "$app" ]] && discord_found=true && break
+            if [[ -d "$app" ]]; then
+                DISCORD_APP="$app"
+                echo ""
+                echo -e "  ${CYAN}Discord Desktop detected:${NC} $app"
+                break
+            fi
         done
     elif [[ "$OS" == "Linux" ]]; then
-        command -v discord &> /dev/null && discord_found=true
-    fi
-
-    if [[ "$discord_found" == true ]]; then
-        echo ""
-        echo -e "  ${CYAN}Discord Desktop detected.${NC}"
-        echo "  If you use Discord Desktop (not Vesktop), inject Vencord:"
-        echo "    cd $vencord_dir && pnpm inject"
+        if command -v discord &> /dev/null; then
+            DISCORD_APP="discord"
+            echo ""
+            echo -e "  ${CYAN}Discord Desktop detected.${NC}"
+        fi
     fi
 }
 
@@ -348,8 +350,12 @@ fi
 echo ""
 configure_vesktop "$VENCORD_DIR/dist" || true
 
-# Check for Discord Desktop
+# Check for Discord Desktop and inject if detected and not using Vesktop
 check_discord_desktop "$VENCORD_DIR"
+[[ -z "$VESKTOP_DATA" && -n "$DISCORD_APP" ]] && {
+    echo -e " ${GREEN}Injecting Vencord into Discord Desktop...${NC}"
+    cd "$VENCORD_DIR" && pnpm inject 2>&1 | tail -3
+}
 
 # ── Done ──────────────────────────────────────────────────────────
 
