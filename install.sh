@@ -36,8 +36,8 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo -e "  ${GREEN}Platform:${NC} macOS Apple Silicon"
     echo ""
     echo -e "  ${BOLD}Choose transcription backend:${NC}"
-    echo -e "    ${CYAN}1)${NC} parakeet-mlx  — fast, uses Apple GPU (recommended)"
-    echo -e "    ${CYAN}2)${NC} parakeet-onnx — Rust/ONNX, CPU-based"
+    echo -e "    ${CYAN}1)${NC} mlx-whisper   — fast, uses Apple GPU (recommended)"
+    echo -e "    ${CYAN}2)${NC} whisper-onnx  — Rust/GGML, CPU-based"
     echo ""
     printf "  Choice [1]: " >/dev/tty
     read -r BACKEND_CHOICE </dev/tty || BACKEND_CHOICE=""
@@ -45,9 +45,9 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
         2) BACKEND="transcribe-rs" ;;
         *) BACKEND="parakeet-mlx" ;;
     esac
-    echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
+    echo -e "  ${GREEN}Backend:${NC}  mlx-whisper"
     mkdir -p "$VOCORD_DATA"
-    echo "$BACKEND" > "$VOCORD_DATA/backend"
+    echo "mlx-whisper" > "$VOCORD_DATA/backend"
 else
     if [[ "$OS" == "Darwin" ]]; then
         echo -e "  ${GREEN}Platform:${NC} macOS Intel"
@@ -259,8 +259,8 @@ echo -e "  ${GREEN}Done${NC}"
 
 echo ""
 
-if [[ "$BACKEND" == "parakeet-mlx" ]]; then
-    echo -e "${BOLD}[2/4]${NC} Installing parakeet-mlx..."
+if [[ "$BACKEND" == "mlx-whisper" ]]; then
+    echo -e "${BOLD}[2/4]${NC} Installing mlx-whisper..."
 
     # Install uv if not present
     if ! command -v uv &> /dev/null; then
@@ -270,17 +270,17 @@ if [[ "$BACKEND" == "parakeet-mlx" ]]; then
     fi
     echo -e "  uv $(uv --version | cut -d' ' -f2)"
 
-    # Create isolated venv and install parakeet-mlx
+    # Create isolated venv and install mlx-whisper
     VOCORD_VENV="$VOCORD_DATA/venv"
     echo "  Creating venv at $VOCORD_VENV..."
     uv venv "$VOCORD_VENV" --quiet --allow-existing
-    echo "  Installing parakeet-mlx (this may take a moment)..."
-    uv pip install --python "$VOCORD_VENV/bin/python" parakeet-mlx --quiet
+    echo "  Installing mlx-whisper (this may take a moment)..."
+    uv pip install --python "$VOCORD_VENV/bin/python" mlx-whisper --quiet
 
-    if "$VOCORD_VENV/bin/python" -c "import parakeet_mlx" 2>/dev/null; then
-        echo -e "  ${GREEN}parakeet-mlx installed in isolated venv${NC}"
+    if "$VOCORD_VENV/bin/python" -c "import mlx_whisper" 2>/dev/null; then
+        echo -e "  ${GREEN}mlx-whisper installed in isolated venv${NC}"
     else
-        echo -e "${RED}Error: Failed to install parakeet-mlx${NC}"
+        echo -e "${RED}Error: Failed to install mlx-whisper${NC}"
         exit 1
     fi
 else
@@ -320,20 +320,17 @@ else
         exit 1
     fi
 
-    # Download Parakeet model
-    MODEL_DIR="$VOCORD_DATA/parakeet-tdt-0.6b-v3-int8"
+    # Download Whisper GGML model
+    MODEL_PATH="$VOCORD_DATA/ggml-large-v3-turbo.bin"
 
-    if [[ ! -d "$MODEL_DIR" ]]; then
-        echo "  Downloading Parakeet v3 int8 model (~200 MB)..."
+    if [[ ! -f "$MODEL_PATH" ]]; then
+        echo "  Downloading Whisper large-v3-turbo model (~800 MB)..."
         mkdir -p "$VOCORD_DATA"
-        curl -L --progress-bar -o "$VOCORD_DATA/parakeet-v3-int8.tar.gz" \
-            "https://blob.handy.computer/parakeet-v3-int8.tar.gz"
-        echo "  Extracting model..."
-        tar -xzf "$VOCORD_DATA/parakeet-v3-int8.tar.gz" -C "$VOCORD_DATA"
-        rm -f "$VOCORD_DATA/parakeet-v3-int8.tar.gz"
-        echo -e "  ${GREEN}Model saved to: $MODEL_DIR${NC}"
+        curl -L --progress-bar -o "$MODEL_PATH" \
+            "https://blob.handy.computer/ggml-large-v3-turbo.bin"
+        echo -e "  ${GREEN}Model saved to: $MODEL_PATH${NC}"
     else
-        echo -e "  Model already at: $MODEL_DIR"
+        echo -e "  Model already at: $MODEL_PATH"
     fi
 fi
 

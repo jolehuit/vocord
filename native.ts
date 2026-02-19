@@ -14,8 +14,8 @@ import { join } from "path";
 const TEMP_DIR = join(tmpdir(), "vencord-vocord");
 const VOCORD_DATA = join(homedir(), ".local", "share", "vocord");
 const VOCORD_VENV_BIN = join(VOCORD_DATA, "venv", "bin");
-const DEFAULT_PARAKEET_MODEL = join(VOCORD_DATA, "parakeet-tdt-0.6b-v3-int8");
-const DEFAULT_MLX_MODEL = "mlx-community/parakeet-tdt-0.6b-v3";
+const DEFAULT_WHISPER_MODEL = join(VOCORD_DATA, "ggml-large-v3-turbo.bin");
+const DEFAULT_MLX_MODEL = "mlx-community/whisper-large-v3-turbo";
 const MAX_REDIRECTS = 5;
 const ALLOWED_HOSTS = ["cdn.discordapp.com", "media.discordapp.net"];
 const SUBPROCESS_TIMEOUT_MS = 5 * 60 * 1000;
@@ -43,13 +43,13 @@ function isMacAppleSilicon(): boolean {
     return platform() === "darwin" && arch() === "arm64";
 }
 
-function resolveBackend(): "parakeet-mlx" | "transcribe-rs" {
+function resolveBackend(): "mlx-whisper" | "transcribe-rs" {
     const backendFile = join(VOCORD_DATA, "backend");
     if (existsSync(backendFile)) {
         const value = readFileSync(backendFile, "utf-8").trim();
-        if (value === "parakeet-mlx" || value === "transcribe-rs") return value;
+        if (value === "mlx-whisper" || value === "transcribe-rs") return value;
     }
-    return isMacAppleSilicon() ? "parakeet-mlx" : "transcribe-rs";
+    return isMacAppleSilicon() ? "mlx-whisper" : "transcribe-rs";
 }
 
 async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
@@ -250,36 +250,33 @@ async function runSubprocess(options: SubprocessOptions): Promise<string> {
     });
 }
 
-/** Transcribe audio using parakeet-mlx (macOS ARM). */
-async function runParakeetMlx(audioPath: string, language: string): Promise<string> {
-    const venvBin = join(VOCORD_VENV_BIN, "parakeet-mlx");
-    const bin = existsSync(venvBin) ? venvBin : "parakeet-mlx";
+/** Transcribe audio using mlx-whisper (macOS ARM). */
+async function runMlxWhisper(audioPath: string): Promise<string> {
+    const python = existsSync(join(VOCORD_VENV_BIN, "python")) ? join(VOCORD_VENV_BIN, "python") : "python3";
 
-    const args = [audioPath, "--model", DEFAULT_MLX_MODEL];
-    if (language) args.push("--language", language);
+    const script = `import mlx_whisper, sys; r = mlx_whisper.transcribe(sys.argv[1], path_or_hf_repo="${DEFAULT_MLX_MODEL}"); print(r["text"].strip())`;
 
     return runSubprocess({
-        command: bin,
-        args,
+        command: python,
+        args: ["-c", script, audioPath],
         cleanupPath: audioPath,
-        label: "parakeet-mlx",
+        label: "mlx-whisper",
         rawOutput: true,
-        enoentMessage: "parakeet-mlx not found. Re-run the Vocord installer or: pip install parakeet-mlx",
+        enoentMessage: "mlx-whisper not found. Re-run the Vocord installer or: pip install mlx-whisper",
     });
 }
 
-/** Transcribe audio using transcribe-cli (cross-platform, Parakeet). */
-async function runTranscribeRs(wavPath: string, language: string): Promise<string> {
-    if (!existsSync(DEFAULT_PARAKEET_MODEL)) {
+/** Transcribe audio using transcribe-cli (cross-platform, Whisper). */
+async function runTranscribeRs(wavPath: string): Promise<string> {
+    if (!existsSync(DEFAULT_WHISPER_MODEL)) {
         rmSync(wavPath, { force: true });
-        throw new Error(`Parakeet model not found at ${DEFAULT_PARAKEET_MODEL}. Re-run the Vocord installer.`);
+        throw new Error(`Whisper model not found at ${DEFAULT_WHISPER_MODEL}. Re-run the Vocord installer.`);
     }
 
     const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
     const cliPath = join(VOCORD_DATA, cliBin);
 
-    const args = ["--audio", wavPath, "--model", DEFAULT_PARAKEET_MODEL];
-    if (language) args.push("--language", language);
+    const args = ["--audio", wavPath, "--model", DEFAULT_WHISPER_MODEL];
 
     return runSubprocess({
         command: cliPath,
@@ -293,8 +290,7 @@ async function runTranscribeRs(wavPath: string, language: string): Promise<strin
 
 export async function transcribe(
     _event: unknown,
-    audioUrl: string,
-    language: string
+    audioUrl: string
 ): Promise<{ text?: string; error?: string }> {
     try {
         const backend = resolveBackend();
@@ -304,15 +300,15 @@ export async function transcribe(
 
         let text: string;
 
-        if (backend === "parakeet-mlx") {
-            console.log(`[Vocord] Transcribing with parakeet-mlx, model: ${DEFAULT_MLX_MODEL}`);
-            text = await runParakeetMlx(oggPath, language);
+        if (backend === "mlx-whisper") {
+            console.log(`[Vocord] Transcribing with mlx-whisper, model: ${DEFAULT_MLX_MODEL}`);
+            text = await runMlxWhisper(oggPath);
         } else {
             console.log(`[Vocord] Converting OGG to WAV...`);
             const wavPath = await convertToWav(oggPath);
 
-            console.log(`[Vocord] Transcribing with Parakeet ONNX, model: ${DEFAULT_PARAKEET_MODEL}`);
-            text = await runTranscribeRs(wavPath, language);
+            console.log(`[Vocord] Transcribing with Whisper GGML, model: ${DEFAULT_WHISPER_MODEL}`);
+            text = await runTranscribeRs(wavPath);
         }
 
         console.log(`[Vocord] Transcription complete: ${text.substring(0, 50)}...`);

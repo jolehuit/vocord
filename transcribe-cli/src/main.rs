@@ -3,23 +3,21 @@ use std::process;
 
 use clap::Parser;
 use serde::Serialize;
-use transcribe_rs::engines::parakeet::{ParakeetEngine, ParakeetModelParams};
-use transcribe_rs::TranscriptionEngine;
+use transcribe_rs::{
+    engines::whisper::{WhisperEngine, WhisperInferenceParams, WhisperModelParams},
+    TranscriptionEngine,
+};
 
 #[derive(Parser)]
-#[command(name = "transcribe-cli", about = "Transcribe audio files using Parakeet")]
+#[command(name = "transcribe-cli", about = "Transcribe audio files using Whisper")]
 struct Args {
     /// Path to the WAV audio file (16kHz, 16-bit, mono)
     #[arg(long)]
     audio: PathBuf,
 
-    /// Path to the Parakeet model directory
+    /// Path to the Whisper GGML model file
     #[arg(long)]
     model: PathBuf,
-
-    /// Language code (unused, Parakeet auto-detects)
-    #[arg(long)]
-    language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -33,10 +31,10 @@ struct ErrorOutput {
 }
 
 fn run(args: Args) -> Result<String, Box<dyn std::error::Error>> {
-    let mut engine = ParakeetEngine::new();
-    engine.load_model_with_params(&args.model, ParakeetModelParams::int8())?;
+    let mut engine = WhisperEngine::new();
+    engine.load_model_with_params(&args.model, WhisperModelParams { use_gpu: true })?;
 
-    let result = engine.transcribe_file(&args.audio, None)?;
+    let result = engine.transcribe_file(&args.audio, Some(WhisperInferenceParams::default()))?;
     Ok(result.text)
 }
 

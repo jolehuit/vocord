@@ -9,11 +9,6 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Toasts } from "@webpack/common";
 
 const settings = definePluginSettings({
-    language: {
-        type: OptionType.STRING,
-        description: "Language code (e.g., 'fr', 'en') or leave empty for auto-detect",
-        default: ""
-    },
     showToast: {
         type: OptionType.BOOLEAN,
         description: "Show toast notification when transcription is complete",
@@ -81,8 +76,7 @@ function createTranscribeButton(audioUrl: string): HTMLElement {
 
         try {
             const result = await (window as any).VencordNative.pluginHelpers.Vocord.transcribe(
-                audioUrl,
-                settings.store.language
+                audioUrl
             );
 
             if (result.error) {
