@@ -5,8 +5,8 @@
  */
 
 import { execFile, spawn } from "child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { randomBytes } from "crypto";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import https from "https";
 import { arch, homedir, platform, tmpdir } from "os";
 import { join } from "path";
@@ -52,7 +52,26 @@ function resolveBackend(): "mlx-whisper" | "transcribe-rs" {
     return isMacAppleSilicon() ? "mlx-whisper" : "transcribe-rs";
 }
 
+function validateAudioUrl(url: string): void {
+    if (!url.startsWith("https://")) {
+        throw new Error("Only HTTPS URLs are supported");
+    }
+
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        throw new Error(`Invalid URL: ${url}`);
+    }
+
+    if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
+        throw new Error(`Untrusted audio host: ${parsed.hostname}`);
+    }
+}
+
 async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
+    validateAudioUrl(url);
+
     return new Promise((resolve, reject) => {
         ensureTempDir();
         const filename = `audio_${Date.now()}_${randomBytes(4).toString("hex")}.ogg`;
@@ -63,22 +82,6 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
             file.destroy();
             rmSync(filepath, { force: true });
         };
-
-        if (!url.startsWith("https://")) {
-            reject(new Error("Only HTTPS URLs are supported"));
-            return;
-        }
-
-        try {
-            const parsed = new URL(url);
-            if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
-                reject(new Error(`Untrusted audio host: ${parsed.hostname}`));
-                return;
-            }
-        } catch {
-            reject(new Error(`Invalid URL: ${url}`));
-            return;
-        }
 
         https.get(url, {
             headers: {
@@ -93,24 +96,17 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
                     reject(new Error("Too many redirects"));
                     return;
                 }
-                const redirectUrl = response.headers.location;
-                if (!redirectUrl) {
+                const location = response.headers.location;
+                if (!location) {
                     reject(new Error(`Redirect ${status} without Location header`));
                     return;
                 }
                 try {
-                    const parsed = new URL(redirectUrl, url);
-                    if (parsed.protocol !== "https:") {
-                        reject(new Error(`Redirect to non-HTTPS URL blocked: ${parsed.protocol}`));
-                        return;
-                    }
-                    if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
-                        reject(new Error(`Redirect to untrusted host blocked: ${parsed.hostname}`));
-                        return;
-                    }
-                    downloadAudio(parsed.href, redirectCount + 1).then(resolve).catch(reject);
-                } catch {
-                    reject(new Error(`Invalid redirect URL: ${redirectUrl}`));
+                    const resolved = new URL(location, url);
+                    validateAudioUrl(resolved.href);
+                    downloadAudio(resolved.href, redirectCount + 1).then(resolve).catch(reject);
+                } catch (err) {
+                    reject(err instanceof Error ? err : new Error(`Invalid redirect URL: ${location}`));
                 }
                 return;
             }
@@ -124,8 +120,14 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
             response.pipe(file);
 
             file.on("finish", () => {
-                file.close();
-                resolve(filepath);
+                file.close(err => {
+                    if (err) {
+                        cleanup();
+                        reject(err);
+                    } else {
+                        resolve(filepath);
+                    }
+                });
             });
         }).on("error", err => {
             cleanup();
@@ -136,7 +138,9 @@ async function downloadAudio(url: string, redirectCount = 0): Promise<string> {
 
 /** Convert OGG audio to WAV (16kHz, 16-bit, mono) using ffmpeg. */
 async function convertToWav(oggPath: string): Promise<string> {
-    const wavPath = oggPath.replace(/\.ogg$/, ".wav");
+    // Always derive the WAV path by stripping any extension then appending .wav,
+    // so the output path is never the same as the input path.
+    const wavPath = oggPath.replace(/\.[^.]+$/, ".wav");
 
     return new Promise((resolve, reject) => {
         execFile("ffmpeg", [
@@ -151,7 +155,8 @@ async function convertToWav(oggPath: string): Promise<string> {
 
             if (error) {
                 rmSync(wavPath, { force: true });
-                const msg = stderr?.includes("not found") || error.message.includes("ENOENT")
+                const isMissing = stderr?.includes("not found") || error.message.includes("ENOENT");
+                const msg = isMissing
                     ? "ffmpeg not found. Install it: brew install ffmpeg (macOS) / sudo apt install ffmpeg (Linux)"
                     : `ffmpeg conversion failed: ${error.message}`;
                 reject(new Error(msg));
@@ -217,24 +222,28 @@ async function runSubprocess(options: SubprocessOptions): Promise<string> {
                 return;
             }
 
+            const trimmed = stdout.trim();
+
             if (rawOutput) {
-                const text = stdout.trim();
-                if (!text) {
+                if (!trimmed) {
                     reject(new Error(`${label} produced no output`));
                 } else {
-                    resolve(text);
+                    resolve(trimmed);
                 }
-            } else {
-                try {
-                    const result = JSON.parse(stdout.trim());
-                    if (result.error) {
-                        reject(new Error(result.error));
-                    } else {
-                        resolve(result.text);
-                    }
-                } catch {
-                    reject(new Error(`Failed to parse ${label} output: ${stdout}`));
+                return;
+            }
+
+            try {
+                const result = JSON.parse(trimmed);
+                if (result.error) {
+                    reject(new Error(result.error));
+                } else if (typeof result.text !== "string") {
+                    reject(new Error(`${label} output missing 'text' field: ${trimmed}`));
+                } else {
+                    resolve(result.text);
                 }
+            } catch {
+                reject(new Error(`Failed to parse ${label} output: ${stdout}`));
             }
         });
 
@@ -252,13 +261,15 @@ async function runSubprocess(options: SubprocessOptions): Promise<string> {
 
 /** Transcribe audio using mlx-whisper (macOS ARM). */
 async function runMlxWhisper(audioPath: string): Promise<string> {
-    const python = existsSync(join(VOCORD_VENV_BIN, "python")) ? join(VOCORD_VENV_BIN, "python") : "python3";
+    const venvPython = join(VOCORD_VENV_BIN, "python");
+    const python = existsSync(venvPython) ? venvPython : "python3";
 
-    const script = `import mlx_whisper, sys; r = mlx_whisper.transcribe(sys.argv[1], path_or_hf_repo="${DEFAULT_MLX_MODEL}"); print(r["text"].strip())`;
+    // Pass the model path via argv so it is never interpolated into Python source code.
+    const script = `import mlx_whisper, sys; r = mlx_whisper.transcribe(sys.argv[1], path_or_hf_repo=sys.argv[2]); print(r["text"].strip())`;
 
     return runSubprocess({
         command: python,
-        args: ["-c", script, audioPath],
+        args: ["-c", script, audioPath, DEFAULT_MLX_MODEL],
         cleanupPath: audioPath,
         label: "mlx-whisper",
         rawOutput: true,
@@ -276,11 +287,9 @@ async function runTranscribeRs(wavPath: string): Promise<string> {
     const cliBin = platform() === "win32" ? "transcribe-cli.exe" : "transcribe-cli";
     const cliPath = join(VOCORD_DATA, cliBin);
 
-    const args = ["--audio", wavPath, "--model", DEFAULT_WHISPER_MODEL];
-
     return runSubprocess({
         command: cliPath,
-        args,
+        args: ["--audio", wavPath, "--model", DEFAULT_WHISPER_MODEL],
         cleanupPath: wavPath,
         label: "transcribe-cli",
         errorStream: "stderr",
@@ -311,7 +320,8 @@ export async function transcribe(
             text = await runTranscribeRs(wavPath);
         }
 
-        console.log(`[Vocord] Transcription complete: ${text.substring(0, 50)}...`);
+        const preview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+        console.log(`[Vocord] Transcription complete: ${preview}`);
         return { text };
     } catch (err) {
         console.error("[Vocord] Error:", err);

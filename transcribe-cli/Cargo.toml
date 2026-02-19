@@ -2,7 +2,7 @@
 name = "transcribe-cli"
 version = "0.2.0"
 edition = "2021"
-description = "CLI wrapper around transcribe-rs parakeet engine for voice message transcription"
+description = "CLI wrapper around transcribe-rs Whisper engine for voice message transcription"
 
 [dependencies]
 transcribe-rs = { version = "0.2", features = ["whisper"] }

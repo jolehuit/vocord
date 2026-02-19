@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 
@@ -31,6 +32,23 @@ struct ErrorOutput {
 }
 
 fn run(args: Args) -> Result<String, Box<dyn std::error::Error>> {
+    // Validate paths upfront to produce actionable error messages before
+    // handing them off to the engine, which may emit opaque C-level errors.
+    if !args.model.exists() {
+        return Err(format!(
+            "Model file not found: {}",
+            args.model.display()
+        )
+        .into());
+    }
+    if !args.audio.exists() {
+        return Err(format!(
+            "Audio file not found: {}",
+            args.audio.display()
+        )
+        .into());
+    }
+
     let mut engine = WhisperEngine::new();
     engine.load_model_with_params(&args.model, WhisperModelParams { use_gpu: true })?;
 
@@ -53,10 +71,11 @@ fn main() {
             let output = ErrorOutput {
                 error: e.to_string(),
             };
-            eprintln!(
-                "{}",
-                serde_json::to_string(&output).expect("failed to serialize error")
-            );
+            let json = serde_json::to_string(&output).expect("failed to serialize error");
+            // Flush stderr explicitly before process::exit so the output is
+            // not lost on platforms that buffer stderr.
+            let _ = writeln!(std::io::stderr(), "{}", json);
+            let _ = std::io::stderr().flush();
             process::exit(1);
         }
     }

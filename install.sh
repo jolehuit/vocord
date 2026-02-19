@@ -31,6 +31,7 @@ trap cleanup EXIT
 # ── Detect platform ───────────────────────────────────────────────
 
 BACKEND="transcribe-rs"
+mkdir -p "$VOCORD_DATA"
 
 if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     echo -e "  ${GREEN}Platform:${NC} macOS Apple Silicon"
@@ -45,19 +46,14 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
         2) BACKEND="transcribe-rs" ;;
         *) BACKEND="mlx-whisper" ;;
     esac
-    echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
-    mkdir -p "$VOCORD_DATA"
-    echo "$BACKEND" > "$VOCORD_DATA/backend"
+elif [[ "$OS" == "Darwin" ]]; then
+    echo -e "  ${GREEN}Platform:${NC} macOS Intel"
 else
-    if [[ "$OS" == "Darwin" ]]; then
-        echo -e "  ${GREEN}Platform:${NC} macOS Intel"
-    else
-        echo -e "  ${GREEN}Platform:${NC} $OS ($ARCH)"
-    fi
-    echo -e "  ${GREEN}Backend:${NC}  transcribe-rs"
-    mkdir -p "$VOCORD_DATA"
-    echo "transcribe-rs" > "$VOCORD_DATA/backend"
+    echo -e "  ${GREEN}Platform:${NC} $OS ($ARCH)"
 fi
+
+echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
+echo "$BACKEND" > "$VOCORD_DATA/backend"
 echo ""
 
 VESKTOP_DATA=""
@@ -89,15 +85,11 @@ configure_vesktop() {
     echo -e "  ${GREEN}Vesktop detected:${NC} $VESKTOP_DATA"
 
     # Try state.json first (newer Vesktop), fall back to settings.json
-    local target_file=""
-    if [[ -f "$VESKTOP_DATA/state.json" ]]; then
-        target_file="$VESKTOP_DATA/state.json"
-    elif [[ -f "$VESKTOP_DATA/settings.json" ]]; then
+    local target_file="$VESKTOP_DATA/state.json"
+    if [[ -f "$VESKTOP_DATA/settings.json" && ! -f "$VESKTOP_DATA/state.json" ]]; then
         target_file="$VESKTOP_DATA/settings.json"
-    else
-        # No config file exists yet -- create state.json
-        echo '{}' > "$VESKTOP_DATA/state.json"
-        target_file="$VESKTOP_DATA/state.json"
+    elif [[ ! -f "$target_file" ]]; then
+        echo '{}' > "$target_file"
     fi
 
     # Use python3 for reliable JSON manipulation
@@ -105,8 +97,11 @@ configure_vesktop() {
         python3 -c "
 import json, sys
 path, dist = sys.argv[1], sys.argv[2]
-with open(path) as f:
-    data = json.load(f)
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (json.JSONDecodeError, ValueError):
+    data = {}
 data['vencordDir'] = dist
 with open(path, 'w') as f:
     json.dump(data, f, indent=4)
@@ -124,7 +119,6 @@ with open(path, 'w') as f:
 # ── Helper: check if Discord Desktop has Vencord injected ────────
 
 check_discord_desktop() {
-    # Check if Discord Desktop is installed
     if [[ "$OS" == "Darwin" ]]; then
         for app in "/Applications/Discord.app" "/Applications/Discord Canary.app" "$HOME/Applications/Discord.app"; do
             if [[ -d "$app" ]]; then
@@ -309,10 +303,12 @@ else
     # Build transcribe-cli
     echo "  Building transcribe-cli (this may take a few minutes)..."
     cd "$TMPDIR_VOCORD/vocord/transcribe-cli"
-    cargo build --release --quiet 2>&1
+    if ! cargo build --release 2>&1; then
+        echo -e "${RED}Error: cargo build failed (see output above)${NC}"
+        exit 1
+    fi
 
     if [[ -f "target/release/transcribe-cli" ]]; then
-        mkdir -p "$VOCORD_DATA"
         cp "target/release/transcribe-cli" "$VOCORD_DATA/transcribe-cli"
         echo -e "  ${GREEN}transcribe-cli built and installed to $VOCORD_DATA${NC}"
     else
@@ -325,9 +321,16 @@ else
 
     if [[ ! -f "$MODEL_PATH" ]]; then
         echo "  Downloading Whisper large-v3-turbo model (~800 MB)..."
-        mkdir -p "$VOCORD_DATA"
-        curl -L --progress-bar -o "$MODEL_PATH" \
-            "https://blob.handy.computer/ggml-large-v3-turbo.bin"
+        # NOTE: This model is served from a third-party host. No checksum is
+        # verified. If you prefer, download it manually from Hugging Face:
+        #   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+        # and place it at: $MODEL_PATH
+        if ! curl -L --fail --progress-bar -o "$MODEL_PATH" \
+            "https://blob.handy.computer/ggml-large-v3-turbo.bin"; then
+            rm -f "$MODEL_PATH"
+            echo -e "${RED}  Error: Model download failed.${NC}"
+            exit 1
+        fi
         echo -e "  ${GREEN}Model saved to: $MODEL_PATH${NC}"
     else
         echo -e "  Model already at: $MODEL_PATH"
@@ -359,7 +362,6 @@ mkdir -p "$DEST"
 cp "$TMPDIR_VOCORD/vocord/index.tsx" "$DEST/"
 cp "$TMPDIR_VOCORD/vocord/native.ts" "$DEST/"
 
-
 echo -e "  ${GREEN}Installed to: $DEST${NC}"
 
 # ── Step 4: Build and configure ───────────────────────────────────
@@ -369,7 +371,8 @@ echo -e "${BOLD}[4/4]${NC} Building Vencord..."
 
 cd "$VENCORD_DIR"
 if command -v pnpm &> /dev/null; then
-    if pnpm build 2>&1 | tail -5; then
+    # Run pnpm build without piping so the exit code is captured directly.
+    if pnpm build 2>&1; then
         # Verify the plugin is actually in the build output
         if grep -q "Vocord" "$VENCORD_DIR/dist/renderer.js" 2>/dev/null; then
             echo -e "  ${GREEN}Build complete (Vocord verified in output)${NC}"
@@ -394,7 +397,7 @@ configure_vesktop "$VENCORD_DIR/dist" || true
 check_discord_desktop
 [[ -z "$VESKTOP_DATA" && -n "$DISCORD_APP" ]] && {
     echo -e "  ${GREEN}Injecting Vencord into Discord Desktop...${NC}"
-    if ! (cd "$VENCORD_DIR" && pnpm inject 2>&1 | tail -5); then
+    if ! (cd "$VENCORD_DIR" && pnpm inject 2>&1); then
         echo -e "${YELLOW}  Warning: Vencord injection failed. Try manually: cd $VENCORD_DIR && pnpm inject${NC}"
     fi
 }

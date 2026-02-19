@@ -18,14 +18,16 @@ const settings = definePluginSettings({
 
 const transcriptions = new Map<string, string>();
 const pendingTranscriptions = new Set<string>();
-const processedElements = new WeakSet<Element>();
+// Use a regular Set so we can clear it when the plugin stops and re-starts,
+// which allows buttons to be re-injected after DOM elements are removed by stop().
+const processedElements = new Set<Element>();
 
 let observer: MutationObserver | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 const MICROPHONE_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line><line x1="8" x2="16" y1="22" y2="22"></line></svg>`;
 
-const SPINNER_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>`;
+const SPINNER_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>`;
 
 const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>`;
 
@@ -159,20 +161,24 @@ function createTranscriptionBox(text: string): HTMLElement {
 }
 
 function processVoiceMessages(): void {
-    // Find audio elements directly — resilient to Discord class name changes
+    // Targets <audio> elements directly -- resilient to Discord class name changes
     document.querySelectorAll("audio").forEach(audio => {
         const url = audio.src || audio.querySelector("source")?.src;
         if (!url) return;
 
         const container = audio.parentElement;
-        if (!container || processedElements.has(container)) return;
+        if (!container) return;
+
+        // DOM-state check is authoritative: if a wrapper already follows the
+        // container in the DOM (e.g. from a previous scan or after restart),
+        // skip regardless of the processedElements cache.
+        if (container.nextElementSibling?.classList.contains("vc-vocord-wrapper")) return;
+
+        // Short-circuit duplicate processing within the same plugin session.
+        if (processedElements.has(container)) return;
 
         processedElements.add(container);
-
-        // Place right after the player as a sibling, not inside
-        if (container.nextElementSibling?.classList.contains("vc-vocord-wrapper")) return;
-        const btn = createTranscribeButton(url);
-        container.insertAdjacentElement("afterend", btn);
+        container.insertAdjacentElement("afterend", createTranscribeButton(url));
     });
 }
 
@@ -273,10 +279,11 @@ export default definePlugin({
         processVoiceMessages();
 
         observer = new MutationObserver(mutations => {
-            if (mutations.some(m => m.addedNodes.length > 0)) {
-                if (debounceTimer) clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(processVoiceMessages, 200);
-            }
+            const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
+            if (!hasNewNodes) return;
+
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(processVoiceMessages, 200);
         });
 
         observer.observe(document.body, {
@@ -302,6 +309,7 @@ export default definePlugin({
 
         transcriptions.clear();
         pendingTranscriptions.clear();
+        processedElements.clear();
 
         console.log("[Vocord] Plugin stopped");
     }
