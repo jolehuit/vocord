@@ -43,11 +43,11 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     read -r BACKEND_CHOICE </dev/tty || BACKEND_CHOICE=""
     case "$BACKEND_CHOICE" in
         2) BACKEND="transcribe-rs" ;;
-        *) BACKEND="parakeet-mlx" ;;
+        *) BACKEND="mlx-whisper" ;;
     esac
-    echo -e "  ${GREEN}Backend:${NC}  mlx-whisper"
+    echo -e "  ${GREEN}Backend:${NC}  $BACKEND"
     mkdir -p "$VOCORD_DATA"
-    echo "mlx-whisper" > "$VOCORD_DATA/backend"
+    echo "$BACKEND" > "$VOCORD_DATA/backend"
 else
     if [[ "$OS" == "Darwin" ]]; then
         echo -e "  ${GREEN}Platform:${NC} macOS Intel"
