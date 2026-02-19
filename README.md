@@ -16,8 +16,8 @@ irm https://raw.githubusercontent.com/jolehuit/vocord/main/install.ps1 | iex
 
 That's it. The installer handles everything automatically:
 - Finds your Vencord source tree (or clones it if you don't have one)
-- **macOS ARM**: lets you choose between parakeet-mlx (GPU, recommended) and parakeet-onnx (CPU)
-- **Linux / macOS Intel / Windows**: installs Rust if needed, builds the transcribe-cli binary, downloads a Whisper model
+- **macOS ARM**: lets you choose between mlx-whisper (GPU, recommended) and whisper-onnx (CPU)
+- **Linux / macOS Intel / Windows**: installs Rust if needed, builds the transcribe-cli binary, downloads the Whisper model
 - Cleans up any existing Vocord installation before reinstalling
 - Copies the plugin into Vencord and rebuilds (verifies Vocord is in the build output)
 - Auto-configures **Vesktop** if detected (closes it, sets the custom Vencord build path, restarts it)
@@ -38,20 +38,30 @@ Restart Discord / Vesktop, enable **Vocord** in Settings > Vencord > Plugins, an
 
 ## How It Works
 
-| Platform | Backend | How |
-|----------|---------|-----|
-| macOS Apple Silicon | [parakeet-mlx](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) | GPU-accelerated via Apple MLX |
-| Linux / Windows / macOS Intel | [Parakeet](https://github.com/cjpais/transcribe-rs) via transcribe-rs | ONNX runtime (Metal/Vulkan GPU) |
+| Platform | Backend | Model |
+|----------|---------|-------|
+| macOS Apple Silicon | [mlx-whisper](https://github.com/ml-explore/mlx-examples) | [whisper-large-v3-turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo) — GPU via Apple MLX |
+| Linux / Windows / macOS Intel | [transcribe-rs](https://github.com/cjpais/transcribe-rs) (Whisper GGML) | ggml-large-v3-turbo — CPU/GPU |
 
-The installer lets you choose your backend on macOS Apple Silicon. On other platforms, Parakeet is used automatically.
+The installer lets you choose your backend on macOS Apple Silicon. On other platforms, transcribe-rs is used automatically.
+
+Auto-detects language — no configuration needed.
 
 ## Features
 
 - One-click transcription of voice messages
-- 100% local -- no data sent to external servers
-- Auto language detection (or set a specific language)
+- 100% local — no data sent to external servers
+- Auto language detection
 - Copy transcription to clipboard
-- Clean reinstall -- re-running the installer removes the old version automatically
+- Clean reinstall — re-running the installer removes the old version automatically
+
+## Settings
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Show Toast | Notification on completion | `true` |
+
+Everything (backend, model, ffmpeg) is auto-detected. No manual configuration needed.
 
 ## Manual Install
 
@@ -67,37 +77,34 @@ If you prefer not to use the one-liner:
    git clone https://github.com/jolehuit/vocord.git /tmp/vocord
    mkdir -p src/userplugins/vocord
    cp /tmp/vocord/index.tsx /tmp/vocord/native.ts src/userplugins/vocord/
-   cp -r /tmp/vocord/transcribe-cli src/userplugins/vocord/
    ```
 
 3. **Set up backend**:
 
-   **macOS ARM:**
+   **macOS ARM (mlx-whisper):**
    ```bash
-   # Install uv (if not already)
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-
-   # Create isolated venv and install parakeet-mlx
    uv venv ~/.local/share/vocord/venv --allow-existing
-   uv pip install --python ~/.local/share/vocord/venv/bin/python parakeet-mlx
+   uv pip install --python ~/.local/share/vocord/venv/bin/python mlx-whisper
+   echo "mlx-whisper" > ~/.local/share/vocord/backend
    ```
 
-   **Linux / Windows / macOS Intel:**
+   **Linux / Windows / macOS Intel (transcribe-rs):**
    ```bash
    # ffmpeg (for ogg->wav conversion)
    brew install ffmpeg          # macOS
    sudo apt install ffmpeg      # Debian/Ubuntu
-   winget install ffmpeg         # Windows
+   winget install ffmpeg        # Windows
 
-   # Build transcribe-cli
-   cd src/userplugins/vocord/transcribe-cli
+   # Build and install transcribe-cli
+   cd /tmp/vocord/transcribe-cli
    cargo build --release
+   cp target/release/transcribe-cli ~/.local/share/vocord/
 
-   # Download Parakeet v3 int8 model (~200 MB)
-   mkdir -p ~/.local/share/vocord
-   curl -L -o /tmp/parakeet.tar.gz https://blob.handy.computer/parakeet-v3-int8.tar.gz
-   tar -xzf /tmp/parakeet.tar.gz -C ~/.local/share/vocord
-   rm /tmp/parakeet.tar.gz
+   # Download Whisper large-v3-turbo GGML model (~800 MB)
+   curl -L --fail -o ~/.local/share/vocord/ggml-large-v3-turbo.bin \
+     https://blob.handy.computer/ggml-large-v3-turbo.bin
+
+   echo "transcribe-rs" > ~/.local/share/vocord/backend
    ```
 
 4. **Build**:
@@ -111,15 +118,6 @@ If you prefer not to use the one-liner:
 
 6. Restart Discord / Vesktop, enable Vocord in Settings > Vencord > Plugins.
 
-## Settings
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Language | Language code (e.g., `fr`, `en`) or empty for auto-detect | auto |
-| Show Toast | Notification on completion | `true` |
-
-Everything else (backend, models, ffmpeg) is auto-detected.
-
 ## Architecture
 
 ```
@@ -128,14 +126,15 @@ Discord Voice Message
   v
 index.tsx (browser) ---IPC---> native.ts (Node.js)
                                   |
-                         platform detection
+                         reads ~/.local/share/vocord/backend
                           /             \
                     macOS ARM64      everything else
+                    (mlx-whisper)         |
+                         |           ffmpeg (ogg->wav)
                          |                |
-                   parakeet-mlx      ffmpeg (ogg->wav)
-                    (uv venv)             |
-                         |          transcribe-cli
-                         |          (Parakeet v3 / ONNX)
+                   python venv       transcribe-cli
+                  (whisper-large-     (Whisper GGML)
+                    v3-turbo)
                           \             /
                            JSON result
                          {"text": "..."}
@@ -147,10 +146,10 @@ index.tsx (browser) ---IPC---> native.ts (Node.js)
 |-------|-----|
 | Plugin not showing (Vesktop) | The installer auto-configures Vesktop. If it didn't work: Vesktop Settings > Developer Options > Vencord Location → select your Vencord `dist/` folder |
 | Plugin not showing (Discord) | Rebuild (`cd Vencord && pnpm build`) and inject (`pnpm inject`), then restart Discord |
-| parakeet-mlx not found | Re-run the installer, or: `uv pip install --python ~/.local/share/vocord/venv/bin/python parakeet-mlx` |
+| mlx-whisper not found | Re-run the installer, or: `uv pip install --python ~/.local/share/vocord/venv/bin/python mlx-whisper` |
 | ffmpeg not found | `brew install ffmpeg` / `sudo apt install ffmpeg` |
-| transcribe-cli not found | `cd transcribe-cli && cargo build --release` |
-| Parakeet model not found | Re-run the installer to download the model |
+| transcribe-cli not found | Re-run the installer to rebuild the binary |
+| Whisper model not found | Re-run the installer to download the model |
 
 ## License
 
@@ -159,8 +158,7 @@ GPL-3.0-or-later
 ## Credits
 
 - [Vencord](https://github.com/Vendicated/Vencord)
-- [NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
-- [parakeet-mlx](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3)
+- [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) / [mlx-community/whisper-large-v3-turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo)
 - [transcribe-rs](https://github.com/cjpais/transcribe-rs)
 - [Handy](https://github.com/cjpais/Handy)
 
