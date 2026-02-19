@@ -1,6 +1,9 @@
-# Vocord
+<img width="569" height="69" alt="Capture d’écran 2026-02-19 à 16 24 01" src="https://github.com/user-attachments/assets/f54d4ea5-3778-45d0-8be2-a9014e6d3324" /># Vocord
 
 Cross-platform voice message transcription for [Vencord](https://github.com/Vendicated/Vencord). 100% local, privacy-first.
+
+<img width="569" height="69" alt="SCREENSHOT" src="https://github.com/user-attachments/assets/b9afd766-dd96-4035-81a1-2cfde1cc1cc4" />
+
 
 ## Quick Start
 
