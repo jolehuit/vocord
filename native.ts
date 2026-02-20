@@ -43,6 +43,16 @@ function isMacAppleSilicon(): boolean {
     return platform() === "darwin" && arch() === "arm64";
 }
 
+/** Return process env with common binary dirs prepended, so subprocesses find ffmpeg etc. */
+function getExtendedEnv(): NodeJS.ProcessEnv {
+    const extras = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+    const current = process.env.PATH ?? "";
+    const merged = [...extras.filter(p => !current.split(":").includes(p)), current]
+        .filter(Boolean)
+        .join(":");
+    return { ...process.env, PATH: merged };
+}
+
 function resolveBackend(): "mlx-whisper" | "transcribe-rs" {
     const backendFile = join(VOCORD_DATA, "backend");
     if (existsSync(backendFile)) {
@@ -150,7 +160,7 @@ async function convertToWav(oggPath: string): Promise<string> {
             "-sample_fmt", "s16",
             "-y",
             wavPath
-        ], { timeout: 30000 }, (error, _stdout, stderr) => {
+        ], { timeout: 30000, env: getExtendedEnv() }, (error, _stdout, stderr) => {
             rmSync(oggPath, { force: true });
 
             if (error) {
@@ -186,7 +196,7 @@ async function runSubprocess(options: SubprocessOptions): Promise<string> {
     const { command, args, cleanupPath, label, errorStream = "stdout", enoentMessage, rawOutput = false } = options;
 
     return new Promise((resolve, reject) => {
-        const proc = spawn(command, args);
+        const proc = spawn(command, args, { env: getExtendedEnv() });
 
         let stdout = "";
         let stderr = "";
